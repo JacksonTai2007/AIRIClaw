@@ -1,0 +1,26 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.turbo/
+.eslintcache
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OpenClaw local data
+.openclaw/
+
+# Coverage
+coverage/

@@ -1,0 +1,25 @@
+{
+  "name": "@airiclaw/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "airiclaw": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@airiclaw/core": "workspace:*",
+    "@airiclaw/types": "workspace:*",
+    "@airiclaw/skill-bridge": "workspace:*",
+    "commander": "^12.0.0",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.5.0"
+  }
+}
