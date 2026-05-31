@@ -1,5 +1,5 @@
-import type { BridgeModule, BridgeEventBus } from '@airiclaw/core'
-import { BRIDGE_EVENTS, type MCPToolDefinition, type SkillChangeEvent } from '@airiclaw/types'
+import type { SkillChangeEvent, MCPToolDefinition } from '@airiclaw/types'
+import { BRIDGE_EVENTS } from '@airiclaw/types'
 import { SkillDiscovery } from './discovery.js'
 import { SkillRegistry } from './registry.js'
 import { SkillToMCPAdapter } from './adapter.js'
@@ -7,17 +7,18 @@ import { SkillExecutor } from './executor.js'
 
 export interface SkillBridgeOptions {
   skillsPath: string
-  events?: BridgeEventBus
   watch?: boolean
+  events?: {
+    emit(event: string, payload: unknown): void
+  }
 }
 
-export class SkillBridge implements BridgeModule {
+export class SkillBridge {
   readonly name = 'skill-bridge'
   readonly registry = new SkillRegistry()
   readonly adapter = new SkillToMCPAdapter()
   readonly executor = new SkillExecutor()
-  readonly discovery: SkillDiscovery
-
+  private readonly discovery: SkillDiscovery
   private watcher?: { close: () => Promise<void> }
 
   constructor(private readonly options: SkillBridgeOptions) {
@@ -28,8 +29,9 @@ export class SkillBridge implements BridgeModule {
     const skills = await this.discovery.scanSkills()
     this.registry.registerAll(skills)
     this.options.events?.emit(BRIDGE_EVENTS.SKILL_LOADED, { count: skills.length })
+
     if (this.options.watch) {
-      this.watcher = this.discovery.watch(event => this.handleChange(event))
+      this.watcher = this.discovery.watch((event) => this.handleChange(event))
     }
   }
 

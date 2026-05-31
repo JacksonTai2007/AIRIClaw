@@ -11,6 +11,7 @@ export interface MemorySyncConfig {
   enabled: boolean
   memoryMdPath?: string
   dailyNotesDir?: string
+  dreamsMdPath?: string
   syncIntervalMs?: number
 }
 
@@ -18,4 +19,11 @@ export interface MemoryQuery {
   query: string
   limit?: number
   tags?: string[]
+}
+
+export interface DreamEntry {
+  id: string
+  promotedFrom: string
+  content: string
+  timestamp: Date
 }

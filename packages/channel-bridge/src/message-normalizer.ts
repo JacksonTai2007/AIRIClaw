@@ -1,25 +1,27 @@
-import type { ChannelMessage } from '@airiclaw/types'
+import type { ChannelMessage, AiriProtocolEvents } from '@airiclaw/types'
 
-export interface NormalizedSparkEvent {
-  event: 'spark:command' | 'spark:notify'
+export type NormalizedSparkEvent = AiriProtocolEvents['spark:command'] & {
   channelId: string
   channelType: string
   senderId: string
-  content: string
-  metadata: Record<string, unknown>
   timestamp: string
 }
 
 export class MessageNormalizer {
-  toSparkEvent(message: ChannelMessage): NormalizedSparkEvent {
+  toSparkCommand(message: ChannelMessage): NormalizedSparkEvent {
     return {
-      event: 'spark:command',
+      command: message.content,
       channelId: message.channelId,
       channelType: message.channelType,
       senderId: message.senderId,
-      content: message.content,
-      metadata: message.metadata ?? {},
       timestamp: message.timestamp.toISOString(),
+    }
+  }
+
+  toInputText(message: ChannelMessage): AiriProtocolEvents['input:text'] {
+    return {
+      text: message.content,
+      sessionId: message.channelId,
     }
   }
 }

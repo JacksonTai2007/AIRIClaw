@@ -1,6 +1,12 @@
 import type { BridgeModule } from '@airiclaw/core'
 import { BridgeEventBus } from '@airiclaw/core'
-import type { ChannelBridgeConfig, ChannelMessage } from '@airiclaw/types'
+import {
+  GATEWAY_DEFAULTS,
+  type ChannelBridgeConfig,
+  type ChannelMessage,
+  type GatewayRequest,
+  type GatewayFrame,
+} from '@airiclaw/types'
 import { MessageNormalizer } from './message-normalizer.js'
 
 export interface ChannelBridgeOptions {
@@ -13,6 +19,7 @@ export interface ChannelBridgeOptions {
 export class ChannelBridge implements BridgeModule {
   readonly name = 'channel-bridge'
   readonly normalizer = new MessageNormalizer()
+  private requestId = 0
 
   constructor(private readonly options: ChannelBridgeOptions) {}
 
@@ -21,11 +28,31 @@ export class ChannelBridge implements BridgeModule {
     if (!this.options.gatewayUrl) {
       throw new Error('channel-bridge requires a gatewayUrl to connect')
     }
-    this.options.events?.emit('channel:connected', { url: this.options.gatewayUrl })
+    this.options.events?.emit('channel:connected', {
+      url: this.options.gatewayUrl,
+      protocolVersion: GATEWAY_DEFAULTS.PROTOCOL_VERSION,
+    })
   }
 
   async stop(): Promise<void> {
-    // v0.1: no persistent connection yet
+    this.requestId = 0
+  }
+
+  createRequest(method: string, params?: Record<string, unknown>): GatewayRequest {
+    return {
+      type: 'req',
+      id: `req_${++this.requestId}`,
+      method,
+      params,
+    }
+  }
+
+  parseFrame(raw: string): GatewayFrame {
+    const frame = JSON.parse(raw) as GatewayFrame
+    if (!frame.type || !['req', 'res', 'event'].includes(frame.type)) {
+      throw new Error(`Invalid gateway frame type: ${(frame as unknown as Record<string, unknown>).type}`)
+    }
+    return frame
   }
 
   ingest(message: ChannelMessage): void {

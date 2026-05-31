@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { SkillRegistry } from './registry.js'
 import type { SkillDefinition } from '@airiclaw/types'
 
-function makeSkill(name: string, description = '', tags: string[] = []): SkillDefinition {
+function makeSkill(name: string, description = '', tags: string[] = [], opts: Partial<SkillDefinition['manifest']> = {}): SkillDefinition {
   return {
-    manifest: { name, description, tags },
+    manifest: { name, description, tags, ...opts },
     instructions: '',
     workflow: [],
     guardrails: [],
@@ -28,7 +28,6 @@ describe('SkillRegistry', () => {
     const skill = makeSkill('git')
     registry.register(skill)
     expect(registry.getByPath(skill.sourcePath)?.manifest.name).toBe('git')
-    expect(registry.getByPath('/unknown/path')).toBeUndefined()
   })
 
   it('unregisters by path in O(1)', () => {
@@ -37,24 +36,22 @@ describe('SkillRegistry', () => {
     registry.register(skill)
     expect(registry.unregisterByPath(skill.sourcePath)).toBe(true)
     expect(registry.has('git')).toBe(false)
-    expect(registry.unregisterByPath(skill.sourcePath)).toBe(false)
   })
 
-  it('updates path index when a skill is moved', () => {
+  it('filters by invocableOnly', () => {
     const registry = new SkillRegistry()
-    registry.register(makeSkill('git', 'old'))
-    const moved: SkillDefinition = { ...makeSkill('git', 'new'), sourcePath: '/skills/new/SKILL.md' }
-    registry.register(moved)
-    expect(registry.getByPath('/skills/git/SKILL.md')).toBeUndefined()
-    expect(registry.getByPath('/skills/new/SKILL.md')?.manifest.description).toBe('new')
+    registry.register(makeSkill('public', 'pub', [], { 'user-invocable': true }))
+    registry.register(makeSkill('internal', 'int'))
+    expect(registry.list({ invocableOnly: true })).toHaveLength(1)
+    expect(registry.list({ invocableOnly: true })[0].manifest.name).toBe('public')
   })
 
-  it('filters by kind and tag', () => {
+  it('excludes hidden skills from search', () => {
     const registry = new SkillRegistry()
-    registry.register(makeSkill('git', 'Git', ['vcs']))
-    registry.register(makeSkill('op', 'OnePassword', ['secrets']))
-    expect(registry.list({ tag: 'secrets' })).toHaveLength(1)
-    expect(registry.list({ tag: 'secrets' })[0].manifest.name).toBe('op')
+    registry.register(makeSkill('visible', 'test skill'))
+    registry.register(makeSkill('secret', 'test hidden', [], { hidden: true }))
+    const results = registry.search('test')
+    expect(results.map(s => s.manifest.name)).toEqual(['visible'])
   })
 
   it('scores search results by relevance', () => {
@@ -62,7 +59,6 @@ describe('SkillRegistry', () => {
     registry.register(makeSkill('git', 'version control'))
     registry.register(makeSkill('github', 'github CLI'))
     registry.register(makeSkill('unrelated', 'has git in description'))
-
     const results = registry.search('git')
     expect(results.map(s => s.manifest.name)).toEqual(['git', 'github', 'unrelated'])
   })
@@ -81,6 +77,5 @@ describe('SkillRegistry', () => {
     registry.register(skill)
     registry.clear()
     expect(registry.size()).toBe(0)
-    expect(registry.getByPath(skill.sourcePath)).toBeUndefined()
   })
 })

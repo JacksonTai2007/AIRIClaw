@@ -2,47 +2,90 @@ import { describe, it, expect } from 'vitest'
 import { SkillToMCPAdapter } from './adapter.js'
 import type { SkillDefinition } from '@airiclaw/types'
 
-const skill: SkillDefinition = {
-  manifest: {
-    name: '1password',
-    description: 'Set up and use 1Password CLI',
-    bins: ['op'],
-    kind: 'formula',
-  },
-  instructions: 'body',
-  workflow: [
-    { order: 1, description: 'Install CLI' },
-    { order: 2, description: 'Sign in' },
-    { order: 3, description: 'Verify' },
-    { order: 4, description: 'Use' },
-  ],
-  guardrails: ['no secrets in logs'],
-  references: [],
-  sourcePath: '/skills/1password/SKILL.md',
+function makeSkill(overrides: Partial<SkillDefinition> = {}): SkillDefinition {
+  return {
+    manifest: {
+      name: 'git',
+      description: 'Git workflows',
+      bins: ['git'],
+      tags: ['vcs'],
+      ...overrides.manifest,
+    } as SkillDefinition['manifest'],
+    instructions: overrides.instructions ?? '# Git\nUse git.',
+    workflow: overrides.workflow ?? [
+      { order: 1, description: 'Check status' },
+      { order: 2, description: 'Stage changes' },
+    ],
+    guardrails: overrides.guardrails ?? ['Do not force push'],
+    references: overrides.references ?? [],
+    sourcePath: overrides.sourcePath ?? '/skills/git/SKILL.md',
+  }
 }
 
 describe('SkillToMCPAdapter', () => {
   const adapter = new SkillToMCPAdapter()
 
-  it('adapts a skill to an MCP tool definition', () => {
-    const tool = adapter.adapt(skill)
-    expect(tool.name).toBe('1password')
+  it('converts a skill to an MCP tool definition', () => {
+    const tool = adapter.adapt(makeSkill())
+    expect(tool.name).toBe('git')
     expect(tool.source).toBe('openclaw-skill')
-    expect(tool.skillName).toBe('1password')
-    expect(tool.description).toContain('Set up and use 1Password CLI')
-    expect(tool.description).toContain('Requires: op')
+    expect(tool.skillName).toBe('git')
+    expect(tool.description).toContain('Git workflows')
+    expect(tool.description).toContain('Requires: git')
+    expect(tool.description).toContain('Workflow:')
   })
 
-  it('produces a valid JSON Schema input', () => {
-    const tool = adapter.adapt(skill)
+  it('sanitizes names with special characters', () => {
+    const tool = adapter.adapt(makeSkill({
+      manifest: { name: 'my@cool/skill!', description: '' } as any,
+    }))
+    expect(tool.name).toMatch(/^[a-zA-Z0-9_-]+$/)
+  })
+
+  it('truncates names longer than 64 characters', () => {
+    const tool = adapter.adapt(makeSkill({
+      manifest: { name: 'a'.repeat(100), description: '' } as any,
+    }))
+    expect(tool.name.length).toBeLessThanOrEqual(64)
+  })
+
+  it('falls back to "skill" for empty names', () => {
+    const tool = adapter.adapt(makeSkill({
+      manifest: { name: '', description: '' } as any,
+    }))
+    expect(tool.name).toBe('skill')
+  })
+
+  it('builds input schema with query and args', () => {
+    const tool = adapter.adapt(makeSkill())
     expect(tool.inputSchema).toMatchObject({
       type: 'object',
+      properties: {
+        query: { type: 'string' },
+        args: { type: 'object' },
+      },
       required: ['query'],
     })
   })
 
-  it('sanitizes MCP tool names', () => {
-    const weird = adapter.adapt({ ...skill, manifest: { ...skill.manifest, name: 'foo bar/baz@1' } })
-    expect(weird.name).toMatch(/^[a-zA-Z0-9_-]+$/)
+  it('adaptAll converts multiple skills', () => {
+    const tools = adapter.adaptAll([
+      makeSkill(),
+      makeSkill({ manifest: { name: 'npm', description: 'npm tools' } as any }),
+    ])
+    expect(tools).toHaveLength(2)
+    expect(tools.map(t => t.name)).toEqual(['git', 'npm'])
+  })
+
+  it('omits workflow preview when no workflow steps exist', () => {
+    const tool = adapter.adapt(makeSkill({ workflow: [] }))
+    expect(tool.description).not.toContain('Workflow:')
+  })
+
+  it('omits requires line when no bins are present', () => {
+    const tool = adapter.adapt(makeSkill({
+      manifest: { name: 'notes', description: 'Note taking', bins: undefined } as any,
+    }))
+    expect(tool.description).not.toContain('Requires:')
   })
 })

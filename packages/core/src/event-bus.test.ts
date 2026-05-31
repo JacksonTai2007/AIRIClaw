@@ -40,4 +40,13 @@ describe('BridgeEventBus', () => {
     bus.emit(BRIDGE_EVENTS.SKILL_LOADED, {})
     expect(handler).not.toHaveBeenCalled()
   })
+
+  it('emits LLM events', () => {
+    const bus = new BridgeEventBus()
+    const handler = vi.fn()
+    bus.on(BRIDGE_EVENTS.LLM_RESPONSE, handler)
+    bus.emit(BRIDGE_EVENTS.LLM_RESPONSE, { model: 'deepseek-v4-pro', text: 'hello' })
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler.mock.calls[0][0].payload).toMatchObject({ model: 'deepseek-v4-pro' })
+  })
 })

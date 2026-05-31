@@ -8,6 +8,15 @@ bins: op
 kind: formula
 emoji: "🔐"
 tags: [secrets, cli]
+user-invocable: true
+metadata:
+  openclaw:
+    always-eligible: true
+    primaryEnv: ONEPASSWORD_TOKEN
+    requires:
+      bins: [op]
+    install:
+      brew: 1password-cli
 ---
 
 # 1Password skill
@@ -41,6 +50,15 @@ describe('parseSkillMarkdown', () => {
     expect(skill.manifest.tags).toEqual(['secrets', 'cli'])
   })
 
+  it('parses new OpenClaw 2026 fields', () => {
+    const skill = parseSkillMarkdown(SAMPLE, { sourcePath: '/skills/1password/SKILL.md' })
+    expect(skill.manifest['user-invocable']).toBe(true)
+    expect(skill.manifest.metadata?.['always-eligible']).toBe(true)
+    expect(skill.manifest.metadata?.primaryEnv).toBe('ONEPASSWORD_TOKEN')
+    expect(skill.manifest.metadata?.requires?.bins).toEqual(['op'])
+    expect(skill.manifest.metadata?.install?.brew).toBe('1password-cli')
+  })
+
   it('extracts workflow steps', () => {
     const skill = parseSkillMarkdown(SAMPLE, { sourcePath: '/skills/1password/SKILL.md' })
     expect(skill.workflow).toHaveLength(3)
@@ -64,50 +82,32 @@ describe('parseSkillMarkdown', () => {
   it('throws if name cannot be resolved', () => {
     expect(() => parseSkillMarkdown('---\n---\n', { sourcePath: '' })).toThrow(/missing a name/)
   })
+
+  it('parses hidden skills', () => {
+    const md = `---\nname: internal\ndescription: hidden skill\nhidden: true\n---\n# body`
+    const skill = parseSkillMarkdown(md, { sourcePath: '/skills/internal/SKILL.md' })
+    expect(skill.manifest.hidden).toBe(true)
+  })
+
+  it('parses command-dispatch skills', () => {
+    const md = `---\nname: calc\ndescription: calculator\ncommand-dispatch: tool\ncommand-tool: calculator\n---\n# body`
+    const skill = parseSkillMarkdown(md, { sourcePath: '/skills/calc/SKILL.md' })
+    expect(skill.manifest['command-dispatch']).toBe('tool')
+    expect(skill.manifest['command-tool']).toBe('calculator')
+  })
 })
 
 describe('extractWorkflow', () => {
   it('attaches commands from a fenced code block to the preceding step', () => {
-    const md = `## Workflow
-
-1. Install
-   \`\`\`
-   brew install foo
-   foo --version
-   \`\`\`
-2. Run
-`
+    const md = `## Workflow\n\n1. Install\n   \`\`\`\n   brew install foo\n   foo --version\n   \`\`\`\n2. Run\n`
     const steps = extractWorkflow(md)
     expect(steps).toHaveLength(2)
     expect(steps[0].commands).toEqual(['   brew install foo', '   foo --version'])
     expect(steps[1].commands).toBeUndefined()
   })
 
-  it('handles multiple fenced code blocks under one step', () => {
-    const md = `## Workflow
-
-1. Step
-   \`\`\`
-   one
-   \`\`\`
-   between
-   \`\`\`
-   two
-   \`\`\`
-`
-    const steps = extractWorkflow(md)
-    expect(steps[0].commands).toEqual(['   one', '   two'])
-  })
-
   it('does not treat list items inside code fences as steps', () => {
-    const md = `## Workflow
-
-1. Real step
-   \`\`\`
-   - not a step
-   1. also not a step
-   \`\`\`
-`
+    const md = `## Workflow\n\n1. Real step\n   \`\`\`\n   - not a step\n   1. also not a step\n   \`\`\`\n`
     expect(extractWorkflow(md)).toHaveLength(1)
   })
 

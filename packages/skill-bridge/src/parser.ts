@@ -1,5 +1,5 @@
 import matter from 'gray-matter'
-import type { SkillDefinition, SkillManifest, WorkflowStep } from '@airiclaw/types'
+import type { SkillDefinition, SkillManifest, SkillMetadata, WorkflowStep } from '@airiclaw/types'
 
 export interface ParseOptions {
   sourcePath: string
@@ -37,6 +37,47 @@ function normalizeManifest(data: Record<string, unknown>, sourcePath: string): S
     homepage: asString(data.homepage),
     version: asString(data.version),
     tags: asStringArray(data.tags),
+    'user-invocable': asBool(data['user-invocable']),
+    hidden: asBool(data.hidden),
+    'command-dispatch': data['command-dispatch'] === 'tool' ? 'tool' : undefined,
+    'command-tool': asString(data['command-tool']),
+    'command-args': asString(data['command-args']),
+    metadata: parseMetadata(data.metadata),
+  }
+}
+
+function parseMetadata(value: unknown): SkillMetadata | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  const openclaw = (typeof raw.openclaw === 'object' && raw.openclaw) ? raw.openclaw as Record<string, unknown> : raw
+  return {
+    emoji: asString(openclaw.emoji),
+    'always-eligible': asBool(openclaw['always-eligible']),
+    primaryEnv: asString(openclaw.primaryEnv),
+    requires: parseRequires(openclaw.requires),
+    install: parseInstall(openclaw.install),
+  }
+}
+
+function parseRequires(value: unknown): SkillMetadata['requires'] {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  return {
+    bins: asStringArray(raw.bins),
+    env: asStringArray(raw.env),
+    config: asStringArray(raw.config),
+  }
+}
+
+function parseInstall(value: unknown): SkillMetadata['install'] {
+  if (!value || typeof value !== 'object') return undefined
+  const raw = value as Record<string, unknown>
+  return {
+    brew: asString(raw.brew),
+    node: asString(raw.node),
+    go: asString(raw.go),
+    uv: asString(raw.uv),
+    download: asString(raw.download),
   }
 }
 
@@ -47,6 +88,11 @@ function inferNameFromPath(path: string): string {
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
+}
+
+function asBool(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value
+  return undefined
 }
 
 function asStringArray(value: unknown): string[] | undefined {

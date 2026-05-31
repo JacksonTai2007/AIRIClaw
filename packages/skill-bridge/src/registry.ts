@@ -53,6 +53,7 @@ export class SkillRegistry {
     return all.filter((s) => {
       if (filter.kind && s.manifest.kind !== filter.kind) return false
       if (filter.tag && !s.manifest.tags?.includes(filter.tag)) return false
+      if (filter.invocableOnly && !s.manifest['user-invocable']) return false
       if (filter.search && score(s, filter.search.toLowerCase()) === 0) return false
       return true
     })
@@ -62,6 +63,7 @@ export class SkillRegistry {
     const q = query.toLowerCase().trim()
     if (!q) return []
     return [...this.skills.values()]
+      .filter(s => !s.manifest.hidden)
       .map(skill => ({ skill, score: score(skill, q) }))
       .filter(r => r.score > 0)
       .sort((a, b) => b.score - a.score || a.skill.manifest.name.localeCompare(b.skill.manifest.name))

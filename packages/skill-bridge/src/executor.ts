@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import type { PrereqCheckResult, SkillDefinition, SkillResult } from '@airiclaw/types'
+import type { SkillDefinition, SkillResult, PrereqCheckResult } from '@airiclaw/types'
 
 export interface ExecuteOptions {
   skipPrereqCheck?: boolean
@@ -21,6 +21,7 @@ export class SkillExecutor {
     options: ExecuteOptions = {},
   ): Promise<SkillResult> {
     const start = Date.now()
+
     if (!options.skipPrereqCheck) {
       const prereq = await this.checkPrerequisites(skill)
       if (!prereq.satisfied) {
@@ -31,6 +32,7 @@ export class SkillExecutor {
         }
       }
     }
+
     return {
       ok: true,
       output: renderPlan(skill, input),
@@ -38,7 +40,7 @@ export class SkillExecutor {
     }
   }
 
-  private async hasBinary(name: string): Promise<boolean> {
+  async hasBinary(name: string): Promise<boolean> {
     const cached = this.binaryCache.get(name)
     if (cached !== undefined) return cached
     const found = await detectBinary(name)
@@ -51,6 +53,7 @@ function renderPlan(skill: SkillDefinition, input: Record<string, unknown>): str
   const lines: string[] = [`# Skill: ${skill.manifest.name}`]
   if (skill.manifest.description) lines.push(skill.manifest.description, '')
   lines.push('## Input', '```json', JSON.stringify(input, null, 2), '```', '')
+
   if (skill.workflow.length) {
     lines.push('## Workflow')
     for (const step of skill.workflow) {
@@ -59,18 +62,20 @@ function renderPlan(skill: SkillDefinition, input: Record<string, unknown>): str
     }
     lines.push('')
   }
+
   if (skill.guardrails.length) {
     lines.push('## Guardrails')
     for (const g of skill.guardrails) lines.push(`- ${g}`)
   }
+
   return lines.join('\n')
 }
 
 function detectBinary(name: string): Promise<boolean> {
   const cmd = process.platform === 'win32' ? 'where' : 'which'
-  return new Promise<boolean>((resolve) => {
+  return new Promise((resolve) => {
     const child = spawn(cmd, [name], { stdio: 'ignore' })
     child.on('error', () => resolve(false))
-    child.on('close', code => resolve(code === 0))
+    child.on('close', (code) => resolve(code === 0))
   })
 }

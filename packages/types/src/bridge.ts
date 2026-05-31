@@ -7,6 +7,15 @@ export interface BridgeConfig {
   airiServerUrl?: string
   memorySync: MemorySyncConfig
   channels: ChannelBridgeConfig
+  llm?: LLMConfig
+}
+
+export interface LLMConfig {
+  provider: 'deepseek' | 'openai' | string
+  model: string
+  apiKey?: string
+  baseURL?: string
+  thinkingMode?: 'non_think' | 'think_high' | 'think_max'
 }
 
 export const BRIDGE_EVENTS = {
@@ -17,8 +26,12 @@ export const BRIDGE_EVENTS = {
   SKILL_CHANGED: 'skill:changed',
   SKILL_REMOVED: 'skill:removed',
   MEMORY_SYNCED: 'memory:synced',
+  MEMORY_DREAMED: 'memory:dreamed',
   CHANNEL_CONNECTED: 'channel:connected',
   CHANNEL_MESSAGE: 'channel:message',
+  LLM_REQUEST: 'llm:request',
+  LLM_RESPONSE: 'llm:response',
+  LLM_ERROR: 'llm:error',
   BRIDGE_STARTED: 'bridge:started',
   BRIDGE_STOPPED: 'bridge:stopped',
 } as const
