@@ -1,29 +1,49 @@
 {
   "name": "airiclaw",
-  "version": "0.2.0",
-  "private": true,
-  "description": "Local-first bridge framework fusing Project AIRI and OpenClaw",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Local-first Agent + digital-human assistant — fusing OpenClaw's agent/skill/gateway runtime with Project AIRI's character & event protocol, powered by DeepSeek V4 Pro",
+  "license": "MIT",
+  "bin": {
+    "airiclaw": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "turbo run build",
-    "dev": "turbo run dev",
-    "typecheck": "turbo run typecheck",
-    "lint": "eslint packages/*/src/**/*.ts",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "turbo run clean"
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "gray-matter": "^4.0.3",
+    "openai": "^4.77.0",
+    "valibot": "^1.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^8.57.0",
-    "tsup": "^8.0.0",
-    "turbo": "^2.0.0",
-    "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.13",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
   },
-  "packageManager": "pnpm@10.0.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }

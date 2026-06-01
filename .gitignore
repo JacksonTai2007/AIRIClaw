@@ -19,7 +19,8 @@ Thumbs.db
 *.swp
 *.swo
 
-# OpenClaw local data
+# Local runtime data (config, memory) — but keep examples/
+.airiclaw/
 .openclaw/
 
 # Coverage
