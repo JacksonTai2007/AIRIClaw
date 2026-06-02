@@ -38,12 +38,18 @@ input:text ─▶ recall memory ─▶ build system prompt ─▶ DeepSeek agent
   with safe headless defaults, so the avatar layer has a contract to render
   against without shipping a full Vue/Electron frontend.
 
+> 📖 **完整使用文档见 [docs/USAGE.md](./docs/USAGE.md)** — 安装、配置、CLI 命令、技能编写、角色卡、记忆、Library API、Gateway 接入、常见问题。
+
 ## Install & build
 
 ```bash
+git clone https://github.com/JacksonTai2007/AIRIClaw.git
+cd AIRIClaw
 pnpm install
 pnpm build      # tsup → dist/
 pnpm test       # vitest (78 tests)
+export DEEPSEEK_API_KEY=sk-...
+node dist/cli.js chat "你好"
 ```
 
 Requires Node ≥ 22.
