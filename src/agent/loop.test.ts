@@ -1,35 +1,38 @@
 import { describe, expect, it, vi } from 'vitest'
-
 import type {
   ChatRequest,
   ChatResponse,
   LLMProvider,
   StreamEvent,
 } from '../llm/types.js'
+import type { AgentContext, AgentEvent, ToolResult } from './types.js'
 import { agentLoop } from './loop.js'
-import type { AgentContext, AgentEvent, AgentLoopConfig, ToolResult } from './types.js'
 
-/**
- * A fake provider that replays scripted responses turn by turn. It also fires
- * the matching stream events so we exercise the loop's event forwarding.
- */
-function scriptedProvider(responses: ChatResponse[]): LLMProvider {
+/** Scripted fake provider: replays ChatResponses, firing matching stream events. */
+function makeFakeProvider(responses: ChatResponse[]): LLMProvider & { requests: ChatRequest[] } {
   let i = 0
+  const requests: ChatRequest[] = []
   return {
     id: 'fake',
-    async chat(): Promise<ChatResponse> {
-      return responses[i++]!
+    requests,
+    async chat(request: ChatRequest): Promise<ChatResponse> {
+      requests.push(request)
+      const response = responses[i++]
+      if (!response) throw new Error('fake provider exhausted')
+      return response
     },
-    async stream(_request: ChatRequest, onEvent: (event: StreamEvent) => void): Promise<ChatResponse> {
-      const response = responses[i++]!
-      if (response.message.content) {
-        onEvent({ type: 'text-delta', text: response.message.content })
-      }
+    async stream(request: ChatRequest, onEvent: (ev: StreamEvent) => void): Promise<ChatResponse> {
+      requests.push(request)
+      const response = responses[i++]
+      if (!response) throw new Error('fake provider exhausted')
       if (response.message.reasoning) {
         onEvent({ type: 'reasoning-delta', text: response.message.reasoning })
       }
-      for (const tc of response.message.tool_calls ?? []) {
-        onEvent({ type: 'tool-call', toolCall: tc })
+      if (response.message.content) {
+        onEvent({ type: 'text-delta', text: response.message.content })
+      }
+      for (const toolCall of response.message.tool_calls ?? []) {
+        onEvent({ type: 'tool-call', toolCall })
       }
       onEvent({ type: 'finish', finishReason: response.finishReason, usage: response.usage })
       return response
@@ -37,136 +40,163 @@ function scriptedProvider(responses: ChatResponse[]): LLMProvider {
   }
 }
 
-describe('agentLoop', () => {
-  it('executes tool calls then terminates on a plain stop response', async () => {
-    const provider = scriptedProvider([
-      {
-        id: 'r1',
-        model: 'deepseek-v4-pro',
-        finishReason: 'tool_calls',
-        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
-        message: {
-          role: 'assistant',
-          content: '',
-          tool_calls: [
-            { id: 'call_1', type: 'function', function: { name: 'get_time', arguments: '{}' } },
-          ],
+function toolCallResponse(): ChatResponse {
+  return {
+    id: 'r1',
+    model: 'fake-model',
+    message: {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        {
+          id: 'call_1',
+          type: 'function',
+          function: { name: 'get_time', arguments: '{}' },
         },
-      },
-      {
-        id: 'r2',
-        model: 'deepseek-v4-pro',
-        finishReason: 'stop',
-        usage: { promptTokens: 20, completionTokens: 8, totalTokens: 28 },
-        message: { role: 'assistant', content: 'It is noon.' },
-      },
-    ])
+      ],
+    },
+    finishReason: 'tool_calls',
+    usage: { promptTokens: 10, completionTokens: 4, totalTokens: 14 },
+  }
+}
 
-    const executeTool = vi.fn(async (call): Promise<ToolResult> => ({
+function stopResponse(content = 'It is noon.'): ChatResponse {
+  return {
+    id: 'r2',
+    model: 'fake-model',
+    message: { role: 'assistant', content },
+    finishReason: 'stop',
+    usage: { promptTokens: 20, completionTokens: 6, totalTokens: 26 },
+  }
+}
+
+function makeContext(): AgentContext {
+  return {
+    systemPrompt: 'You are a helpful agent.',
+    messages: [{ role: 'user', content: 'What time is it?' }],
+    tools: [
+      {
+        type: 'function',
+        function: { name: 'get_time', description: 'Get the time', parameters: {} },
+      },
+    ],
+  }
+}
+
+describe('agentLoop', () => {
+  it('runs a tool-call turn then a stop turn', async () => {
+    const provider = makeFakeProvider([toolCallResponse(), stopResponse()])
+    const executor = vi.fn(async (call): Promise<ToolResult> => ({
       toolCallId: call.id,
       name: call.function.name,
       content: '12:00',
     }))
-
     const events: AgentEvent[] = []
-    const context: AgentContext = {
-      systemPrompt: 'You are a clock.',
-      messages: [{ role: 'user', content: 'What time is it?' }],
-      tools: [
-        {
-          type: 'function',
-          function: { name: 'get_time', description: 'Get time', parameters: {} },
-        },
-      ],
-    }
-    const config: AgentLoopConfig = { executeTool, toolExecutionMode: 'sequential' }
 
-    const result = await agentLoop(provider, context, config, (e) => events.push(e))
-
-    // Tool executed exactly once.
-    expect(executeTool).toHaveBeenCalledTimes(1)
-
-    // Final transcript: user, assistant(tool_calls), tool, assistant(stop).
-    expect(result.map((m) => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
-    expect(result.at(-1)?.content).toBe('It is noon.')
-
-    const types = events.map((e) => e.type)
-    expect(types[0]).toBe('agent_start')
-    expect(types.at(-1)).toBe('agent_end')
-    expect(types).toContain('tool_call')
-    expect(types).toContain('tool_result')
-
-    // Usage accumulated across both turns.
-    const end = events.at(-1)
-    expect(end?.type === 'agent_end' && end.usage.totalTokens).toBe(43)
-  })
-
-  it('terminates immediately when the model returns no tool calls', async () => {
-    const provider = scriptedProvider([
-      {
-        id: 'r1',
-        model: 'deepseek-v4-pro',
-        finishReason: 'stop',
-        usage: { promptTokens: 5, completionTokens: 3, totalTokens: 8 },
-        message: { role: 'assistant', content: 'Hello!' },
-      },
-    ])
-
-    const events: AgentEvent[] = []
-    const result = await agentLoop(
+    const transcript = await agentLoop(
       provider,
-      { systemPrompt: 'hi', messages: [{ role: 'user', content: 'hi' }], tools: [] },
-      {},
-      (e) => events.push(e),
+      makeContext(),
+      { executeTool: executor },
+      ev => events.push(ev),
     )
 
-    expect(result.map((m) => m.role)).toEqual(['user', 'assistant'])
-    expect(events.filter((e) => e.type === 'turn_start')).toHaveLength(1)
-  })
+    expect(transcript.map(m => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+    expect(executor).toHaveBeenCalledTimes(1)
 
-  it('captures tool executor failures as error results without crashing', async () => {
-    const provider = scriptedProvider([
-      {
-        id: 'r1',
-        model: 'deepseek-v4-pro',
-        finishReason: 'tool_calls',
-        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
-        message: {
-          role: 'assistant',
-          content: '',
-          tool_calls: [
-            { id: 'c1', type: 'function', function: { name: 'boom', arguments: '{}' } },
-          ],
-        },
-      },
-      {
-        id: 'r2',
-        model: 'deepseek-v4-pro',
-        finishReason: 'stop',
-        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
-        message: { role: 'assistant', content: 'done' },
-      },
+    const toolMessage = transcript[2]!
+    expect(toolMessage.tool_call_id).toBe('call_1')
+    expect(toolMessage.name).toBe('get_time')
+    expect(toolMessage.content).toBe('12:00')
+    expect(toolMessage.createdAt).toBeTypeOf('number')
+
+    const types = events.map(e => e.type)
+    expect(types).toEqual([
+      'agent_start',
+      'turn_start',
+      'message_start',
+      'message_end',
+      'tool_execution_start',
+      'tool_execution_end',
+      'turn_end',
+      'turn_start',
+      'message_start',
+      'message_update',
+      'message_end',
+      'turn_end',
+      'agent_end',
     ])
 
-    const executeTool = vi.fn(async (): Promise<ToolResult> => {
-      throw new Error('kaboom')
+    const end = events.at(-1)
+    expect(end).toMatchObject({
+      type: 'agent_end',
+      usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 },
     })
 
+    // System prompt is prepended on every request; tools sent with toolChoice auto.
+    expect(provider.requests[0]!.messages[0]).toEqual({
+      role: 'system',
+      content: 'You are a helpful agent.',
+    })
+    expect(provider.requests[0]!.toolChoice).toBe('auto')
+    // Second request includes the assistant tool-call message and the tool result.
+    expect(provider.requests[1]!.messages.map(m => m.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool',
+    ])
+  })
+
+  it('stops after a single turn when no tool calls are requested', async () => {
+    const provider = makeFakeProvider([stopResponse('Hello!')])
     const events: AgentEvent[] = []
-    const result = await agentLoop(
+
+    const transcript = await agentLoop(
       provider,
-      {
-        systemPrompt: 's',
-        messages: [{ role: 'user', content: 'go' }],
-        tools: [{ type: 'function', function: { name: 'boom', description: '', parameters: {} } }],
-      },
-      { executeTool },
-      (e) => events.push(e),
+      { systemPrompt: 'sys', messages: [{ role: 'user', content: 'hi' }], tools: [] },
+      {},
+      ev => events.push(ev),
     )
 
-    const toolResultEvent = events.find((e) => e.type === 'tool_result')
-    expect(toolResultEvent?.type === 'tool_result' && toolResultEvent.result.isError).toBe(true)
-    expect(toolResultEvent?.type === 'tool_result' && toolResultEvent.result.content).toBe('kaboom')
-    expect(result.at(-1)?.content).toBe('done')
+    expect(transcript.map(m => m.role)).toEqual(['user', 'assistant'])
+    expect(events.filter(e => e.type === 'turn_start')).toHaveLength(1)
+    expect(events.some(e => e.type === 'tool_execution_start')).toBe(false)
+    // No tools → request omits tools/toolChoice.
+    expect(provider.requests[0]!.tools).toBeUndefined()
+    expect(provider.requests[0]!.toolChoice).toBeUndefined()
+    // message_update carries the text delta.
+    expect(events.find(e => e.type === 'message_update')).toEqual({
+      type: 'message_update',
+      delta: 'Hello!',
+      channel: 'text',
+    })
+  })
+
+  it('continues to completion when the executor throws, marking the result as error', async () => {
+    const provider = makeFakeProvider([toolCallResponse(), stopResponse('Sorry, tool failed.')])
+    const executor = vi.fn(async () => {
+      throw new Error('tool exploded')
+    })
+    const events: AgentEvent[] = []
+
+    const transcript = await agentLoop(
+      provider,
+      makeContext(),
+      { executeTool: executor, toolExecutionMode: 'sequential' },
+      ev => events.push(ev),
+    )
+
+    const endEvent = events.find(e => e.type === 'tool_execution_end')
+    expect(endEvent).toBeDefined()
+    if (endEvent?.type === 'tool_execution_end') {
+      expect(endEvent.result.isError).toBe(true)
+      expect(endEvent.result.content).toBe('tool exploded')
+      expect(endEvent.result.toolCallId).toBe('call_1')
+    }
+
+    expect(transcript.map(m => m.role)).toEqual(['user', 'assistant', 'tool', 'assistant'])
+    expect(transcript[2]!.content).toBe('tool exploded')
+    expect(events.at(-1)?.type).toBe('agent_end')
+    expect(events.some(e => e.type === 'error')).toBe(false)
   })
 })

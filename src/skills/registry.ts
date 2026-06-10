@@ -1,72 +1,62 @@
 /**
- * An in-memory registry of parsed skills, keyed by name.
- *
- * Provides filtered listing (by tag/requires and invocability) plus a
- * model-facing `search` that excludes skills opted out of model invocation.
+ * In-memory skill registry — lookup by name or skillKey, policy-aware
+ * listing, and model-facing search.
  */
 
+import { resolveSkillKey } from './frontmatter.js'
 import type { Skill, SkillFilter } from './types.js'
 
 export class SkillRegistry {
   private readonly skills = new Map<string, Skill>()
 
-  /** Add (or replace by name) a skill. */
+  /** Adds (or replaces) a skill, keyed by its manifest name. */
   add(skill: Skill): void {
     this.skills.set(skill.manifest.name, skill)
   }
 
-  /** Retrieve a skill by exact name. */
-  get(name: string): Skill | undefined {
-    return this.skills.get(name)
+  /** Looks a skill up by manifest name, falling back to metadata.skillKey. */
+  get(nameOrKey: string): Skill | undefined {
+    const byName = this.skills.get(nameOrKey)
+    if (byName) return byName
+    for (const skill of this.skills.values()) {
+      if (resolveSkillKey(skill) === nameOrKey) return skill
+    }
+    return undefined
   }
 
-  /** All registered skills, in insertion order. */
   all(): Skill[] {
     return [...this.skills.values()]
   }
 
-  /** Number of registered skills. */
   get size(): number {
     return this.skills.size
   }
 
-  /**
-   * List skills, optionally filtered by a required bin/env tag and/or
-   * restricted to user-invocable skills.
-   */
   list(filter?: SkillFilter): Skill[] {
-    let result = this.all()
-    if (filter?.invocableOnly) {
-      result = result.filter((s) => s.manifest.userInvocable === true)
-    }
-    if (filter?.tag) {
-      const tag = filter.tag
-      result = result.filter((s) => skillMatchesTag(s, tag))
-    }
-    return result
-  }
-
-  /**
-   * Case-insensitive substring search over name + description. Excludes skills
-   * with `disableModelInvocation === true`, which are not model-discoverable.
-   */
-  search(query: string): Skill[] {
-    const q = query.trim().toLowerCase()
-    return this.all().filter((s) => {
-      if (s.manifest.disableModelInvocation === true) return false
-      if (q.length === 0) return true
-      const haystack = `${s.manifest.name} ${s.manifest.description}`.toLowerCase()
-      return haystack.includes(q)
+    return this.all().filter((skill) => {
+      if (filter?.invocableOnly && skill.manifest.policy.userInvocable !== true) {
+        return false
+      }
+      if (filter?.alwaysOnly && skill.manifest.metadata?.always !== true) {
+        return false
+      }
+      return true
     })
   }
-}
 
-/** A skill matches a tag if it appears among its required bins, env, or its name. */
-function skillMatchesTag(skill: Skill, tag: string): boolean {
-  const t = tag.toLowerCase()
-  if (skill.manifest.name.toLowerCase() === t) return true
-  const requires = skill.manifest.metadata?.requires
-  if (requires?.bins?.some((b) => b.toLowerCase() === t)) return true
-  if (requires?.env?.some((e) => e.toLowerCase() === t)) return true
-  return false
+  /**
+   * Case-insensitive substring search over name + description.
+   * Skills with `disable-model-invocation` are never surfaced; an empty
+   * query returns every model-invocable skill.
+   */
+  search(query: string): Skill[] {
+    const needle = query.trim().toLowerCase()
+    return this.all().filter((skill) => {
+      if (skill.manifest.policy.disableModelInvocation === true) return false
+      if (!needle) return true
+      const haystack =
+        `${skill.manifest.name} ${skill.manifest.description}`.toLowerCase()
+      return haystack.includes(needle)
+    })
+  }
 }

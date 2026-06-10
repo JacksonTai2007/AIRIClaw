@@ -1,7 +1,7 @@
 /**
- * Digital-human speech abstraction: text-to-speech, speech-to-text, and
- * lip-sync analysis. Concrete providers (cloud TTS, whisper, audio engines)
- * implement these interfaces; the runtime depends only on the abstraction.
+ * Voice abstraction for the digital-human layer: text-to-speech,
+ * speech-to-text, and lip-sync analysis. Implementations may be headless
+ * (no-op) or wired to real engines; consumers depend only on these contracts.
  */
 
 export interface SpeechSynthesisRequest {
@@ -38,6 +38,7 @@ export interface STTProvider {
   transcribe(req: TranscriptionRequest): Promise<TranscriptionResult>
 }
 
+/** One frame of mouth animation; `mouthOpen` is normalized to [0, 1]. */
 export interface LipSyncFrame {
   mouthOpen: number
   vowel?: 'A' | 'E' | 'I' | 'O' | 'U'

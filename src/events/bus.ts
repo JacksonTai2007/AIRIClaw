@@ -1,10 +1,10 @@
 /**
- * A tiny typed event bus over the AIRI protocol event map. No external deps;
- * synchronous dispatch with async-safe listeners (errors are isolated so one
- * bad listener never breaks the emit).
+ * Typed event bus over the AIRI protocol event map. Zero dependencies;
+ * synchronous dispatch with isolated listeners — one bad listener never
+ * breaks an emit.
  */
 
-import type { ProtocolEvents, ProtocolEventName } from './types.js'
+import type { ProtocolEventName, ProtocolEvents } from './types.js'
 
 export type Listener<E extends ProtocolEventName> = (
   payload: ProtocolEvents[E],
@@ -23,7 +23,7 @@ export class EventBus {
       this.listeners.set(event, set)
     }
     set.add(listener as Listener<ProtocolEventName>)
-    return () => set!.delete(listener as Listener<ProtocolEventName>)
+    return () => set.delete(listener as Listener<ProtocolEventName>)
   }
 
   once<E extends ProtocolEventName>(event: E, listener: Listener<E>): Unsubscribe {
@@ -34,7 +34,7 @@ export class EventBus {
     return off
   }
 
-  /** Subscribe to every event (useful for logging / gateway fan-out). */
+  /** Subscribe to every event (logging, gateway fan-out). */
   onAny(listener: (event: ProtocolEventName, payload: unknown) => void): Unsubscribe {
     this.anyListeners.add(listener)
     return () => this.anyListeners.delete(listener)
@@ -55,14 +55,15 @@ export class EventBus {
       try {
         listener(event, payload)
       } catch (error) {
-        console.error(`[airiclaw] onAny listener threw:`, error)
+        console.error('[airiclaw] onAny listener threw:', error)
       }
     }
   }
 
   removeAll(event?: ProtocolEventName): void {
-    if (event) this.listeners.delete(event)
-    else {
+    if (event) {
+      this.listeners.delete(event)
+    } else {
       this.listeners.clear()
       this.anyListeners.clear()
     }

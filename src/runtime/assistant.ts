@@ -2,14 +2,15 @@
  * The Assistant runtime — where OpenClaw's agent/skill core meets AIRI's
  * character & event protocol, powered by DeepSeek V4 Pro.
  *
- * A turn flows like this:
+ * One turn:
  *   input:text
- *     -> recall long-term memory (keyword search)         [AIRI memory]
- *     -> build system prompt from character card + skills  [AIRI persona / OpenClaw skills]
- *     -> run the agent loop against DeepSeek               [OpenClaw agent-core]
- *         - skill tools, when called, return their SKILL.md body (progressive disclosure)
- *     -> stream output:gen-ai:chat:* protocol events       [AIRI protocol]
- *     -> persist the exchange to memory
+ *     -> recall long-term memory (keyword search)          [memory]
+ *     -> build system prompt: persona + skills + memory     [character/skills]
+ *        (`always` skills get their full instructions inlined)
+ *     -> run the streaming agent loop against DeepSeek      [agent]
+ *        (skill tools return their SKILL.md body — progressive disclosure)
+ *     -> emit output:gen-ai:chat:* protocol events          [events]
+ *     -> persist the exchange to a daily note               [memory]
  */
 
 import type { AppConfig } from '../config/schema.js'
@@ -23,23 +24,17 @@ import { formatSkillsForPrompt } from '../skills/prompt.js'
 import { skillsToTools } from '../skills/tool-adapter.js'
 import type { Skill } from '../skills/types.js'
 import { DeepSeekProvider } from '../llm/deepseek.js'
-import type { LLMProvider } from '../llm/types.js'
+import type { LLMProvider, ToolCall } from '../llm/types.js'
 import { agentLoop } from '../agent/loop.js'
-import type {
-  AgentContext,
-  AgentEvent,
-  AgentMessage,
-  ToolResult,
-} from '../agent/types.js'
-import type { ToolCall } from '../llm/types.js'
+import type { AgentContext, AgentEvent, AgentMessage, ToolResult } from '../agent/types.js'
 import { EventBus } from '../events/bus.js'
 
 export interface AssistantOptions {
   config: AppConfig
   character?: CharacterCard
-  /** Inject a provider (tests). Defaults to a DeepSeekProvider from config.llm. */
+  /** Inject a provider (tests). Defaults to DeepSeekProvider from config.llm. */
   provider?: LLMProvider
-  /** Inject a skill registry (tests). Defaults to discovery from config.skillsDir. */
+  /** Inject a registry (tests). Defaults to discovery from config.skillsDir. */
   registry?: SkillRegistry
   /** Inject a memory store (tests). Defaults to config.memoryDir. */
   memory?: MemoryStore
@@ -50,20 +45,8 @@ export interface AssistantOptions {
 export interface ChatResult {
   /** Final assistant text. */
   text: string
-  /** Full transcript produced this turn (assistant + tool messages appended). */
+  /** Full transcript produced this turn. */
   messages: AgentMessage[]
-}
-
-/** Mirrors a sanitized tool name back to the skill it represents. */
-function buildSkillToolIndex(skills: Skill[]): Map<string, Skill> {
-  const index = new Map<string, Skill>()
-  const tools = skillsToTools(skills)
-  for (let i = 0; i < tools.length; i++) {
-    const tool = tools[i]
-    const skill = skills[i]
-    if (tool && skill) index.set(tool.function.name, skill)
-  }
-  return index
 }
 
 export class Assistant {
@@ -90,42 +73,40 @@ export class Assistant {
     try {
       this.registry = await loadSkillRegistry(this.config.skillsDir)
     } catch {
-      // No skills dir yet — that's fine, the assistant still runs.
+      // No skills directory yet — the assistant still runs.
     }
     return this.registry.size
   }
 
   /**
    * Run one conversational turn. Streams protocol events on `this.events` and
-   * returns the final assistant text + this turn's transcript.
+   * resolves with the final assistant text plus this turn's transcript.
    */
   async chat(input: string, sessionId?: string): Promise<ChatResult> {
     this.events.emit('input:text', { text: input, sessionId, source: 'api' })
 
-    const skills = this.registry.search('') // model-invocable skills only
-    const skillIndex = buildSkillToolIndex(skills)
+    // Model-invocable skills become tools; `always` skills are inlined fully.
+    const skills = this.registry.search('')
     const tools = skillsToTools(skills)
+    const skillIndex = buildToolIndex(skills, tools.map((t) => t.function.name))
+    const alwaysInstructions = this.registry
+      .list({ alwaysOnly: true })
+      .map((s) => s.instructions)
 
-    const memoryHits = await this.recall(input)
+    const memory = await this.recall(input)
     const systemPrompt = buildSystemPrompt(this.character, {
       skills: formatSkillsForPrompt(skills),
-      memory: memoryHits,
+      memory,
+      contexts: alwaysInstructions,
     })
 
-    const userMessage: AgentMessage = {
-      role: 'user',
-      content: input,
-      createdAt: Date.now(),
-    }
-    this.history.push(userMessage)
+    this.history.push({ role: 'user', content: input, createdAt: Date.now() })
 
     const context: AgentContext = {
       systemPrompt,
       messages: [...this.history],
       tools,
     }
-
-    const sink = (event: AgentEvent) => this.forwardAgentEvent(event, sessionId)
 
     const produced = await agentLoop(
       this.provider,
@@ -136,25 +117,24 @@ export class Assistant {
         maxTokens: this.config.llm.maxTokens,
         executeTool: (call) => this.executeSkillTool(call, skillIndex),
       },
-      sink,
+      (event) => this.forwardAgentEvent(event, sessionId),
     )
 
-    // Append everything after the user message to history.
     this.history.push(...produced.slice(context.messages.length))
 
-    const finalText = lastAssistantText(produced)
-    await this.persist(input, finalText)
-    return { text: finalText, messages: produced }
+    const text = lastAssistantText(produced)
+    await this.persist(input, text)
+    return { text, messages: produced }
   }
 
-  /** Recall relevant long-term memory as a prompt-ready string. */
+  /** Recall relevant long-term memory as a prompt-ready bullet list. */
   private async recall(query: string): Promise<string> {
     const results = await this.memory.search(query, 5).catch(() => [])
     if (results.length === 0) return ''
     return results.map((r) => `- ${r.chunk.text.trim()}`).join('\n')
   }
 
-  /** A skill tool, when invoked, returns its SKILL.md body for the model to follow. */
+  /** A skill tool returns its SKILL.md body for the model to follow. */
   private async executeSkillTool(
     call: ToolCall,
     index: Map<string, Skill>,
@@ -168,20 +148,18 @@ export class Assistant {
         isError: true,
       }
     }
-    return {
-      toolCallId: call.id,
-      name: call.function.name,
-      content: skill.instructions,
-    }
+    return { toolCallId: call.id, name: call.function.name, content: skill.instructions }
   }
 
   /** Translate agent-loop events into AIRI protocol events on the bus. */
   private forwardAgentEvent(event: AgentEvent, sessionId?: string): void {
     switch (event.type) {
-      case 'text_delta':
-        this.events.emit('output:gen-ai:chat:delta', { delta: event.text, sessionId })
+      case 'message_update':
+        if (event.channel === 'text') {
+          this.events.emit('output:gen-ai:chat:delta', { delta: event.delta, sessionId })
+        }
         break
-      case 'tool_call':
+      case 'tool_execution_start':
         this.events.emit('output:gen-ai:chat:tool-call', { call: event.call, sessionId })
         break
       case 'message_end':
@@ -205,13 +183,24 @@ export class Assistant {
     }
   }
 
-  /** Persist the exchange to long-term memory (best-effort). */
+  /** Persist the exchange to today's daily note (best-effort). */
   private async persist(input: string, output: string): Promise<void> {
     if (!output) return
     await this.memory
       .appendDailyNote(`**User:** ${input}\n\n**${this.character.name}:** ${output}`)
       .catch(() => {})
   }
+}
+
+/** Map sanitized tool names back to the skills they wrap. */
+function buildToolIndex(skills: Skill[], toolNames: string[]): Map<string, Skill> {
+  const index = new Map<string, Skill>()
+  for (let i = 0; i < toolNames.length; i++) {
+    const name = toolNames[i]
+    const skill = skills[i]
+    if (name && skill) index.set(name, skill)
+  }
+  return index
 }
 
 function lastAssistantMessage(messages: AgentMessage[]): AgentMessage | undefined {

@@ -1,20 +1,22 @@
 /**
- * AIRI-style protocol events. These drive the digital-human layer: the agent
- * runtime emits `output:gen-ai:chat:*` and `spark:*` events; input arrives as
- * `input:text` / `input:voice`. Names & payload shapes mirror AIRI v0.10.2's
- * `plugin-protocol` package so an AIRI-compatible frontend could subscribe.
+ * AIRI-style protocol events — the seam where the digital-human layer plugs in.
+ *
+ * The agent runtime emits `output:gen-ai:chat:*`, `output:emotion`,
+ * `output:lipsync`, `output:speech` and `spark:*`; input arrives as
+ * `input:text` / `input:voice`. Names and payload shapes mirror AIRI v0.10.2's
+ * `plugin-protocol` package so AIRI-compatible frontends can subscribe.
  */
 
 import type { AgentMessage } from '../agent/types.js'
 import type { TokenUsage, ToolCall } from '../llm/types.js'
 
-/** Where an output event should be delivered (avatar, voice, channel id...). */
+/** Delivery target tag (avatar, voice, a channel id, ...). */
 export type Destination = string
 
 export interface InputTextEvent {
   text: string
   sessionId?: string
-  /** Optional source tag, e.g. 'cli' | 'discord' | 'stage-web'. */
+  /** Source tag, e.g. 'cli' | 'gateway' | 'stage-web'. */
   source?: string
 }
 
@@ -25,14 +27,14 @@ export interface InputVoiceEvent {
   source?: string
 }
 
-export interface OutputChatMessageEvent {
-  message: AgentMessage
-  sessionId?: string
-}
-
 export interface OutputChatDeltaEvent {
   /** Incremental assistant text for streaming captions / speech. */
   delta: string
+  sessionId?: string
+}
+
+export interface OutputChatMessageEvent {
+  message: AgentMessage
   sessionId?: string
 }
 
@@ -47,28 +49,28 @@ export interface OutputChatCompleteEvent {
   sessionId?: string
 }
 
-/** Emotion / expression hint for the avatar (Live2D/VRM expression name). */
+/** Expression hint for the avatar (Live2D/VRM expression name). */
 export interface OutputEmotionEvent {
   emotion: string
   intensity?: number
   sessionId?: string
 }
 
-/** Lip-sync mouth-open value (0-1) for avatar mouth animation. */
+/** Lip-sync mouth-open value (0–1) for avatar mouth animation. */
 export interface OutputLipSyncEvent {
   mouthOpen: number
   vowel?: 'A' | 'E' | 'I' | 'O' | 'U'
   sessionId?: string
 }
 
-/** Synthesized speech audio ready for playback. */
+/** Synthesized speech ready for playback. */
 export interface OutputSpeechEvent {
   audio: ArrayBuffer
   text: string
   sessionId?: string
 }
 
-/** Context injection (memory recall, situational awareness) — AIRI context:update. */
+/** Context injection (memory recall, situational awareness) — AIRI `context:update`. */
 export interface ContextUpdateEvent {
   id: string
   contextId: string
@@ -97,10 +99,7 @@ export interface SparkCommandEvent {
   destinations: Destination[]
 }
 
-/**
- * The complete protocol event map. Keys are the wire event names; values are
- * the payload types. Consumed by the typed {@link EventBus}.
- */
+/** Wire event name → payload type, consumed by the typed {@link EventBus}. */
 export interface ProtocolEvents {
   'input:text': InputTextEvent
   'input:voice': InputVoiceEvent

@@ -1,41 +1,37 @@
 /**
- * Deterministic placeholder lip-sync driver. Treats the audio as 16-bit PCM,
- * windows the samples into a fixed number of frames, and emits a normalized RMS
- * mouth-open envelope (0..1). This gives the digital-human layer plausible
- * mouth-open values without a real audio-analysis engine.
+ * Deterministic, dependency-free lip-sync estimation: treats the audio buffer
+ * as 16-bit PCM samples and derives a mouth-open envelope from per-window RMS.
  */
 
 import type { LipSyncDriver, LipSyncFrame } from './types.js'
 
-const MAX_INT16 = 32768
+const MAX_WINDOWS = 64
+const INT16_FULL_SCALE = 32768
 
 export class EstimateLipSync implements LipSyncDriver {
   readonly id = 'estimate'
 
   analyze(audio: ArrayBuffer): LipSyncFrame[] {
-    // Int16Array requires an even byte length; clamp to a multiple of 2.
-    const usableBytes = audio.byteLength - (audio.byteLength % 2)
-    if (usableBytes <= 0) return []
+    if (audio.byteLength < 2) return []
 
-    const samples = new Int16Array(audio, 0, usableBytes / 2)
-    const total = samples.length
-    if (total === 0) return []
+    // Truncate any odd trailing byte so the Int16 view is always valid.
+    const sampleCount = Math.floor(audio.byteLength / 2)
+    const samples = new Int16Array(audio, 0, sampleCount)
 
-    const windows = Math.min(64, total)
-    const windowSize = Math.ceil(total / windows)
+    const windowCount = Math.min(MAX_WINDOWS, sampleCount)
     const frames: LipSyncFrame[] = []
 
-    for (let start = 0; start < total; start += windowSize) {
-      const end = Math.min(start + windowSize, total)
+    for (let w = 0; w < windowCount; w++) {
+      const start = Math.floor((w * sampleCount) / windowCount)
+      const end = Math.floor(((w + 1) * sampleCount) / windowCount)
       let sumSquares = 0
       for (let i = start; i < end; i++) {
-        const v = samples[i]! / MAX_INT16
-        sumSquares += v * v
+        const sample = samples[i] ?? 0
+        sumSquares += sample * sample
       }
-      const count = end - start
-      const rms = count > 0 ? Math.sqrt(sumSquares / count) : 0
-      // RMS is already in 0..1 for normalized samples; clamp for safety.
-      const mouthOpen = Math.max(0, Math.min(1, rms))
+      const size = end - start
+      const rms = size > 0 ? Math.sqrt(sumSquares / size) : 0
+      const mouthOpen = Math.min(1, Math.max(0, rms / INT16_FULL_SCALE))
       frames.push({ mouthOpen })
     }
 

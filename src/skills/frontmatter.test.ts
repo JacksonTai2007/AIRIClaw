@@ -1,108 +1,198 @@
-import { describe, it, expect } from 'vitest'
-import { parseSkillMarkdown } from './frontmatter.js'
+import { describe, expect, it } from 'vitest'
+import { parseSkillMarkdown, resolveSkillKey } from './frontmatter.js'
 
-const FULL_SKILL = `---
-name: video-frames
-description: "Extract frames or short clips from videos using ffmpeg."
-homepage: https://ffmpeg.org
+const FULL_SAMPLE = `---
+name: gifgrep
+description: "Search GIF providers with CLI/TUI, download results, and extract stills."
+user-invocable: true
+disable-model-invocation: false
 metadata:
   openclaw:
-    emoji: "🎬"
     always: true
-    skillKey: vf
-    primaryEnv: FFMPEG_BIN
-    os: ["darwin", "linux"]
+    emoji: "🧲"
+    homepage: https://gifgrep.com
+    skillKey: gif-grep
+    primaryEnv: GIFGREP_API_KEY
+    os:
+      - darwin
+      - linux
     requires:
-      bins: ["ffmpeg"]
-      env: ["FFMPEG_BIN"]
+      bins:
+        - gifgrep
+      env:
+        - GIFGREP_API_KEY
     install:
       - id: brew
         kind: brew
-        formula: ffmpeg
-        bins: ["ffmpeg"]
-        label: "Install ffmpeg (brew)"
+        formula: steipete/tap/gifgrep
+        bins:
+          - gifgrep
+        label: Install gifgrep (brew)
+      - id: go
+        kind: go
+        module: github.com/steipete/gifgrep/cmd/gifgrep@latest
+        bins:
+          - gifgrep
 ---
 
-# Video Frames
+# gifgrep
 
-Extract a single frame from a video.
+Use \`gifgrep\` to search GIF providers.
 `
 
 describe('parseSkillMarkdown', () => {
-  it('parses nested metadata.openclaw fields', () => {
-    const skill = parseSkillMarkdown(FULL_SKILL, {
-      sourcePath: '/skills/video-frames/SKILL.md',
+  it('parses a full sample with metadata.openclaw', () => {
+    const skill = parseSkillMarkdown(FULL_SAMPLE, {
+      sourcePath: '/skills/gifgrep/SKILL.md',
     })
-    expect(skill.manifest.name).toBe('video-frames')
-    expect(skill.manifest.description).toContain('Extract frames')
-    const md = skill.manifest.metadata
-    expect(md?.emoji).toBe('🎬')
-    expect(md?.always).toBe(true)
-    expect(md?.skillKey).toBe('vf')
-    expect(md?.primaryEnv).toBe('FFMPEG_BIN')
-    expect(md?.os).toEqual(['darwin', 'linux'])
-    expect(md?.homepage).toBe('https://ffmpeg.org')
-    expect(md?.requires?.bins).toEqual(['ffmpeg'])
-    expect(md?.requires?.env).toEqual(['FFMPEG_BIN'])
-    expect(md?.install?.[0]).toMatchObject({
+    expect(skill.manifest.name).toBe('gifgrep')
+    expect(skill.manifest.description).toContain('Search GIF providers')
+    expect(skill.manifest.policy).toEqual({
+      userInvocable: true,
+      disableModelInvocation: false,
+    })
+    const metadata = skill.manifest.metadata
+    expect(metadata).toBeDefined()
+    expect(metadata?.always).toBe(true)
+    expect(metadata?.emoji).toBe('🧲')
+    expect(metadata?.homepage).toBe('https://gifgrep.com')
+    expect(metadata?.skillKey).toBe('gif-grep')
+    expect(metadata?.primaryEnv).toBe('GIFGREP_API_KEY')
+    expect(metadata?.os).toEqual(['darwin', 'linux'])
+    expect(metadata?.requires).toEqual({
+      bins: ['gifgrep'],
+      env: ['GIFGREP_API_KEY'],
+    })
+    expect(metadata?.install).toHaveLength(2)
+    expect(metadata?.install?.[0]).toMatchObject({
       id: 'brew',
       kind: 'brew',
-      formula: 'ffmpeg',
-      bins: ['ffmpeg'],
-      label: 'Install ffmpeg (brew)',
+      formula: 'steipete/tap/gifgrep',
+      bins: ['gifgrep'],
+      label: 'Install gifgrep (brew)',
     })
-  })
-
-  it('captures instructions, baseDir and sourcePath', () => {
-    const skill = parseSkillMarkdown(FULL_SKILL, {
-      sourcePath: '/skills/video-frames/SKILL.md',
+    expect(metadata?.install?.[1]).toMatchObject({
+      id: 'go',
+      kind: 'go',
+      module: 'github.com/steipete/gifgrep/cmd/gifgrep@latest',
     })
-    expect(skill.sourcePath).toBe('/skills/video-frames/SKILL.md')
-    expect(skill.baseDir).toBe('/skills/video-frames')
-    expect(skill.instructions.startsWith('# Video Frames')).toBe(true)
-    expect(skill.instructions.endsWith('a video.')).toBe(true)
-    expect(skill.raw).toBe(FULL_SKILL)
+    expect(skill.instructions.startsWith('# gifgrep')).toBe(true)
+    expect(skill.baseDir).toBe('/skills/gifgrep')
+    expect(skill.sourcePath).toBe('/skills/gifgrep/SKILL.md')
+    expect(skill.raw).toBe(FULL_SAMPLE)
   })
 
-  it('infers name from parent directory when frontmatter omits it', () => {
-    const raw = `---\ndescription: "no name here"\n---\nbody`
-    const skill = parseSkillMarkdown(raw, {
-      sourcePath: '/some/path/my-cool-skill/SKILL.md',
-    })
-    expect(skill.manifest.name).toBe('my-cool-skill')
-  })
-
-  it('throws when name cannot be resolved', () => {
-    const raw = `---\ndescription: "x"\n---\nbody`
-    expect(() => parseSkillMarkdown(raw, { sourcePath: 'SKILL.md' })).toThrow()
-  })
-
-  it('maps disable-model-invocation and user-invocable (kebab + camel)', () => {
-    const kebab = parseSkillMarkdown(
-      `---\nname: a\ndescription: d\ndisable-model-invocation: true\nuser-invocable: true\n---\nb`,
-      { sourcePath: '/x/a/SKILL.md' },
+  it('defaults userInvocable to true when absent', () => {
+    const skill = parseSkillMarkdown(
+      '---\nname: quiet\ndescription: d\n---\nbody',
+      { sourcePath: '/skills/quiet/SKILL.md' },
     )
-    expect(kebab.manifest.disableModelInvocation).toBe(true)
-    expect(kebab.manifest.userInvocable).toBe(true)
+    expect(skill.manifest.policy.userInvocable).toBe(true)
+    expect(skill.manifest.policy.disableModelInvocation).toBe(false)
+  })
 
-    const camel = parseSkillMarkdown(
-      `---\nname: b\ndescription: d\ndisableModelInvocation: false\nuserInvocable: false\n---\nb`,
-      { sourcePath: '/x/b/SKILL.md' },
+  it('parses disable-model-invocation', () => {
+    const skill = parseSkillMarkdown(
+      '---\nname: hidden\ndisable-model-invocation: true\nuser-invocable: false\n---\nbody',
+      { sourcePath: '/skills/hidden/SKILL.md' },
     )
-    expect(camel.manifest.disableModelInvocation).toBe(false)
-    expect(camel.manifest.userInvocable).toBe(false)
+    expect(skill.manifest.policy.disableModelInvocation).toBe(true)
+    expect(skill.manifest.policy.userInvocable).toBe(false)
   })
 
-  it('falls back to bare metadata block (no openclaw nesting)', () => {
-    const raw = `---\nname: c\ndescription: d\nmetadata:\n  emoji: "✨"\n  requires:\n    bins: ["foo"]\n---\nbody`
-    const skill = parseSkillMarkdown(raw, { sourcePath: '/x/c/SKILL.md' })
-    expect(skill.manifest.metadata?.emoji).toBe('✨')
-    expect(skill.manifest.metadata?.requires?.bins).toEqual(['foo'])
+  it('infers name from the parent directory of sourcePath', () => {
+    const skill = parseSkillMarkdown('---\ndescription: no name\n---\nbody', {
+      sourcePath: '/skills/foo/SKILL.md',
+    })
+    expect(skill.manifest.name).toBe('foo')
   })
 
-  it('promotes top-level homepage into metadata', () => {
-    const raw = `---\nname: d\ndescription: x\nhomepage: https://example.com\n---\nbody`
-    const skill = parseSkillMarkdown(raw, { sourcePath: '/x/d/SKILL.md' })
+  it('throws when no name can be resolved', () => {
+    expect(() =>
+      parseSkillMarkdown('---\ndescription: d\n---\nbody', {
+        sourcePath: 'SKILL.md',
+      }),
+    ).toThrow(/no name/i)
+  })
+
+  it('promotes top-level homepage into metadata when the block lacks it', () => {
+    const skill = parseSkillMarkdown(
+      [
+        '---',
+        'name: homey',
+        'homepage: https://example.com',
+        'metadata:',
+        '  openclaw:',
+        '    emoji: "🏠"',
+        '---',
+        'body',
+      ].join('\n'),
+      { sourcePath: '/skills/homey/SKILL.md' },
+    )
     expect(skill.manifest.metadata?.homepage).toBe('https://example.com')
+    expect(skill.manifest.metadata?.emoji).toBe('🏠')
+  })
+
+  it('does not override an explicit metadata homepage', () => {
+    const skill = parseSkillMarkdown(
+      [
+        '---',
+        'name: homey',
+        'homepage: https://outer.example.com',
+        'metadata:',
+        '  openclaw:',
+        '    homepage: https://inner.example.com',
+        '---',
+        'body',
+      ].join('\n'),
+      { sourcePath: '/skills/homey/SKILL.md' },
+    )
+    expect(skill.manifest.metadata?.homepage).toBe('https://inner.example.com')
+  })
+
+  it('skips install entries with invalid kind', () => {
+    const skill = parseSkillMarkdown(
+      [
+        '---',
+        'name: installer',
+        'metadata:',
+        '  openclaw:',
+        '    install:',
+        '      - id: apt',
+        '        kind: apt',
+        '        package: gh',
+        '      - id: brew',
+        '        kind: brew',
+        '        formula: gh',
+        '---',
+        'body',
+      ].join('\n'),
+      { sourcePath: '/skills/installer/SKILL.md' },
+    )
+    expect(skill.manifest.metadata?.install).toHaveLength(1)
+    expect(skill.manifest.metadata?.install?.[0]?.kind).toBe('brew')
+  })
+
+  it('omits metadata when no block exists', () => {
+    const skill = parseSkillMarkdown('---\nname: bare\n---\nbody', {
+      sourcePath: '/skills/bare/SKILL.md',
+    })
+    expect(skill.manifest.metadata).toBeUndefined()
+  })
+})
+
+describe('resolveSkillKey', () => {
+  it('prefers metadata.skillKey over the name', () => {
+    const skill = parseSkillMarkdown(FULL_SAMPLE, {
+      sourcePath: '/skills/gifgrep/SKILL.md',
+    })
+    expect(resolveSkillKey(skill)).toBe('gif-grep')
+  })
+
+  it('falls back to the manifest name', () => {
+    const skill = parseSkillMarkdown('---\nname: plain\n---\nbody', {
+      sourcePath: '/skills/plain/SKILL.md',
+    })
+    expect(resolveSkillKey(skill)).toBe('plain')
   })
 })

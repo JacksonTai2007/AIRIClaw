@@ -1,8 +1,8 @@
 {
   "name": "airiclaw",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
-  "description": "Local-first Agent + digital-human assistant — fusing OpenClaw's agent/skill/gateway runtime with Project AIRI's character & event protocol, powered by DeepSeek V4 Pro",
+  "description": "Local-first Agent + digital-human assistant — OpenClaw's agent/skill/gateway runtime fused with Project AIRI's character & event protocol, powered by DeepSeek V4 Pro",
   "license": "MIT",
   "bin": {
     "airiclaw": "./dist/cli.js"
@@ -30,7 +30,6 @@
   "dependencies": {
     "gray-matter": "^4.0.3",
     "openai": "^4.77.0",
-    "valibot": "^1.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

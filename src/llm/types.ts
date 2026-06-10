@@ -1,7 +1,9 @@
 /**
- * LLM contracts. Provider-agnostic chat/tool types plus the streaming event
- * shape. Modelled on OpenClaw's `llm-core` types and AIRI's xsAI StreamEvent,
- * unified into one OpenAI-compatible surface that DeepSeek V4 Pro plugs into.
+ * LLM contracts — the provider-agnostic chat surface everything builds on.
+ *
+ * Shapes are distilled from OpenClaw 2026.6.2 `llm-core` (Model/Context/
+ * StreamFunction) and AIRI v0.10.2's xsAI StreamEvent, collapsed into one
+ * OpenAI-compatible interface that DeepSeek V4 Pro plugs straight into.
  */
 
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool'
@@ -11,7 +13,7 @@ export interface ToolCall {
   type: 'function'
   function: {
     name: string
-    /** Raw JSON string of arguments, as returned by the model. */
+    /** Raw JSON string of arguments, exactly as returned by the model. */
     arguments: string
   }
 }
@@ -19,17 +21,17 @@ export interface ToolCall {
 export interface ChatMessage {
   role: MessageRole
   content: string
-  /** Present on `tool` messages: the id of the call this result answers. */
+  /** On `tool` messages: the id of the call this result answers. */
   tool_call_id?: string
   /** Optional speaker name (OpenAI `name` field). */
   name?: string
-  /** Present on `assistant` messages that request tool calls. */
+  /** On `assistant` messages that request tool calls. */
   tool_calls?: ToolCall[]
-  /** Reasoning trace surfaced by thinking models (DeepSeek `reasoning_content`). */
+  /** Reasoning trace from thinking models (DeepSeek `reasoning_content`). */
   reasoning?: string
 }
 
-/** A JSON-schema-shaped tool definition the model may call. */
+/** JSON-schema-shaped function tool the model may call. */
 export interface ToolDefinition {
   type: 'function'
   function: {
@@ -78,8 +80,8 @@ export interface ChatResponse {
 }
 
 /**
- * Streaming delta events. Mirrors AIRI's xsAI StreamEvent so the digital-human
- * layer can consume token/reasoning deltas for real-time speech & captions.
+ * Streaming deltas. Mirrors xsAI's StreamEvent so the digital-human layer can
+ * consume token/reasoning deltas for live captions and speech.
  */
 export type StreamEvent =
   | { type: 'text-delta'; text: string }
@@ -88,7 +90,7 @@ export type StreamEvent =
   | { type: 'finish'; finishReason: FinishReason; usage?: TokenUsage }
   | { type: 'error'; error: Error }
 
-/** The provider contract. A provider streams events and resolves a final response. */
+/** Provider contract: stream events live, resolve the assembled response. */
 export interface LLMProvider {
   readonly id: string
   chat(request: ChatRequest): Promise<ChatResponse>

@@ -17,14 +17,14 @@ pnpm install
 pnpm build
 ```
 
-构建成功后，CLI 可执行文件位于 `dist/cli.js`。可选择全局链接：
+构建产物在 `dist/`。可全局链接：
 
 ```bash
 pnpm link --global
 # 之后任意目录可直接使用 airiclaw 命令
 ```
 
-或者直接通过 node 运行：
+或直接运行：
 
 ```bash
 node dist/cli.js <command>
@@ -45,49 +45,40 @@ export DEEPSEEK_API_KEY="sk-your-key-here"
 ### `airiclaw chat` — 对话
 
 ```bash
-# 一次性对话（输出完毕自动退出）
-airiclaw chat "帮我总结一下 TypeScript 5.7 的新特性"
+# 一次性对话（输出完自动退出）
+airiclaw chat "帮我总结一下 TypeScript 5.9 的新特性"
 
 # 交互式 REPL（不传参数进入聊天模式）
 airiclaw chat
 ```
 
-交互模式下输入 `exit` 或 `quit` 退出。对话过程中 AI 的回复会**流式输出**到终端。
+交互模式输入 `exit` / `quit` 退出。回复**流式输出**到终端。
 
 ### `airiclaw skills` — 技能管理
 
 ```bash
-# 列出所有技能
-airiclaw skills list
-
-# 仅列出用户可主动调用的技能
-airiclaw skills list -i
-
-# 搜索技能（模糊匹配名称+描述）
-airiclaw skills search weather
-airiclaw skills search "视频"
+airiclaw skills list          # 列出所有技能
+airiclaw skills list -i       # 仅列出用户可主动调用的技能
+airiclaw skills search 天气   # 模糊搜索（名称+描述）
 ```
 
 ### `airiclaw serve` — 启动 Gateway 服务
 
 ```bash
-# 默认端口 18789
-airiclaw serve
-
-# 自定义端口
-airiclaw serve --port 9000
+airiclaw serve                # 默认端口 18789
+airiclaw serve --port 9000    # 自定义端口
 ```
 
-启动后，任何 WebSocket 客户端可连接 `ws://localhost:18789`，通过 OpenClaw 协议 v4 帧格式通信：
+启动后任何 WebSocket 客户端可连接 `ws://localhost:18789`，使用 OpenClaw 协议 v4 帧格式：
 
 ```json
-// 发送请求
+// 请求
 {"type":"req","id":"1","method":"chat","params":{"text":"你好"}}
 
-// 收到响应
+// 响应
 {"type":"res","id":"1","ok":true,"payload":{"text":"你好！有什么我能帮你的吗？"}}
 
-// 实时事件（自动推送到所有客户端）
+// 实时事件（自动推送给所有客户端）
 {"type":"event","event":"output:gen-ai:chat:delta","payload":{"delta":"你"},"seq":1}
 ```
 
@@ -115,21 +106,13 @@ airiclaw config init
 }
 ```
 
-### `airiclaw status` — 查看当前状态
+### `airiclaw status` — 查看状态
 
-```bash
-airiclaw status
-```
-
-输出当前生效的配置（合并了文件配置 + 环境变量后的最终值）。
+输出合并文件配置 + 环境变量后的最终生效配置。
 
 ---
 
 ## 配置
-
-### 配置文件
-
-`.airiclaw/config.json`（项目目录下）。所有字段都有默认值，文件可以只写你想覆盖的部分。
 
 ### 环境变量
 
@@ -143,37 +126,35 @@ airiclaw status
 | `AIRICLAW_SKILLS_DIR` | 技能目录 | `.airiclaw/skills` |
 | `AIRICLAW_MEMORY_DIR` | 记忆目录 | `.airiclaw/memory` |
 
-### 思考模式说明
+### 思考模式
 
 DeepSeek V4 Pro 支持三种模式：
 
 | 模式 | 说明 | 适用场景 |
 |---|---|---|
-| `non_think` | 不输出思考过程，直接回答 | 简单问答，追求速度 |
-| `think_high` | 中等思考深度（默认） | 日常使用，平衡质量与速度 |
-| `think_max` | 最深度思考，输出完整推理链 | 复杂推理、代码分析、数学 |
+| `non_think` | 不思考直接回答 | 简单问答，追求速度 |
+| `think_high` | 中等思考深度（默认） | 日常使用，质量与速度平衡 |
+| `think_max` | 最深度思考 | 复杂推理、代码分析、数学 |
 
 ---
 
 ## 技能（Skills）
 
-### 什么是技能
+### 工作原理
 
-技能是用 `SKILL.md` 文件描述的能力模块。AI 在对话中判断需要某个技能时会自动调用它——具体做法是把技能的 Markdown 正文作为操作指南喂给模型（渐进式披露，而非一次性加载所有指南）。
+技能用 `SKILL.md` 描述。AI 判断需要某技能时会调用对应工具，系统把技能的
+Markdown 正文作为操作指南喂给模型（渐进式披露——不会一次性把所有指南塞进
+prompt）。标记 `always: true` 的技能例外：它们的全文会直接进入 system prompt。
 
-### 技能目录结构
+### 目录结构
 
 ```
 .airiclaw/skills/
 ├── web-fetch/
 │   └── SKILL.md
-├── calculator/
-│   └── SKILL.md
-└── git-helper/
+└── calculator/
     └── SKILL.md
 ```
-
-每个技能是一个文件夹，内含一个 `SKILL.md`。
 
 ### 编写一个技能
 
@@ -185,8 +166,8 @@ metadata:
   openclaw:
     emoji: "🔧"
     requires:
-      bins: ["curl"]          # 需要的命令行工具
-      env: ["MY_API_KEY"]     # 需要的环境变量
+      bins: ["curl"]          # 依赖的命令行工具
+      env: ["MY_API_KEY"]     # 依赖的环境变量
     install:
       - id: brew
         kind: brew
@@ -197,37 +178,37 @@ metadata:
 
 # My Skill
 
-这里写技能的详细操作指南，AI 调用这个技能时会看到这些内容。
+这里写详细操作指南，AI 调用技能时会读到。
 
 ## Workflow
 
-1. 第一步做什么
-2. 第二步做什么
+1. 第一步
+2. 第二步
 
 ## Guardrails
 
-- 不要做什么
-- 注意什么
+- 禁止事项
 ```
 
 ### Frontmatter 字段
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `name` | string | 技能名（可省略，从目录名推断） |
-| `description` | string | 一句话描述 |
-| `user-invocable` | boolean | 是否允许用户直接列出/调用 |
-| `disable-model-invocation` | boolean | `true` 则 AI 看不到此技能 |
-| `metadata.openclaw.emoji` | string | 显示用的 emoji |
-| `metadata.openclaw.requires.bins` | string[] | 依赖的命令行工具 |
-| `metadata.openclaw.requires.env` | string[] | 依赖的环境变量 |
-| `metadata.openclaw.install` | array | 安装方式（brew/node/go/uv/download） |
-| `metadata.openclaw.primaryEnv` | string | 主要环境变量名 |
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `name` | string | 从目录名推断 | 技能名 |
+| `description` | string | `''` | 一句话描述 |
+| `user-invocable` | boolean | **`true`** | 是否允许用户直接调用 |
+| `disable-model-invocation` | boolean | `false` | `true` 则 AI 看不到此技能 |
+| `metadata.openclaw.always` | boolean | — | `true` 则全文常驻 system prompt |
+| `metadata.openclaw.emoji` | string | — | 展示 emoji |
+| `metadata.openclaw.skillKey` | string | — | 备用调用键名 |
+| `metadata.openclaw.primaryEnv` | string | — | 主要环境变量名 |
+| `metadata.openclaw.requires.bins` | string[] | — | 依赖的命令行工具 |
+| `metadata.openclaw.requires.env` | string[] | — | 依赖的环境变量 |
+| `metadata.openclaw.install` | array | — | 安装方式（brew/node/go/uv/download） |
 
-### 使用示例中的技能
+### 试用示例技能
 
 ```bash
-# 指向 examples 目录中附带的示例技能
 AIRICLAW_SKILLS_DIR=examples/skills airiclaw skills list
 AIRICLAW_SKILLS_DIR=examples/skills airiclaw chat "fetch https://example.com"
 ```
@@ -238,19 +219,17 @@ AIRICLAW_SKILLS_DIR=examples/skills airiclaw chat "fetch https://example.com"
 
 ### 默认角色
 
-AIRIClaw 内置了名为 "AIRI" 的默认角色，无需任何配置即可使用。
+内置名为 "AIRI" 的默认角色，开箱即用。
 
 ### 自定义角色
 
-创建一个 JSON 文件（参考 `examples/character/airi.json`）：
+创建 JSON 文件（参考 `examples/character/airi.json`）：
 
 ```json
 {
   "name": "小助手",
-  "version": "1.0.0",
-  "description": "一个专注于编程的本地助手",
   "personality": "逻辑清晰，回答简洁直接。",
-  "scenario": "用户在本地终端中与助手对话，主要讨论编程问题。",
+  "scenario": "用户在本地终端与助手讨论编程问题。",
   "greetings": ["你好！今天写什么代码？"],
   "systemPrompt": "你是一个编程助手，擅长 TypeScript 和系统设计。",
   "postHistoryInstructions": "回答时优先给出代码示例。",
@@ -260,86 +239,73 @@ AIRIClaw 内置了名为 "AIRI" 的默认角色，无需任何配置即可使用
 }
 ```
 
-在 `.airiclaw/config.json` 中指定路径：
+在 `.airiclaw/config.json` 中指定：
 
 ```json
-{
-  "characterPath": "./my-character.json"
-}
+{ "characterPath": "./my-character.json" }
 ```
 
-### 角色卡字段
+### 字段说明
 
 | 字段 | 说明 |
 |---|---|
 | `name` | 角色名 |
 | `personality` | 性格描述（注入 system prompt） |
 | `scenario` | 场景设定 |
-| `greetings` | 开场白（REPL 模式显示） |
+| `greetings` | 开场白（REPL 模式显示第一条） |
 | `systemPrompt` | 核心系统提示词 |
-| `postHistoryInstructions` | 追加在对话末尾的指令 |
+| `postHistoryInstructions` | 追加在最后的指令 |
 | `modules.consciousness` | LLM 配置 |
-| `modules.speech` | 语音合成配置（TTS provider/voiceId） |
-| `modules.avatar` | 头像配置（Live2D/VRM 源） |
+| `modules.speech` | 语音合成配置（provider/voiceId 等） |
+| `modules.avatar` | 头像配置（live2d/vrm + file/url） |
 
 ---
 
 ## 记忆系统
 
-AIRIClaw 自动在 `memoryDir`（默认 `.airiclaw/memory/`）中维护：
+自动维护在 `memoryDir`（默认 `.airiclaw/memory/`）：
 
 ```
 .airiclaw/memory/
-├── MEMORY.md         # 长期记忆（手动或程序追加）
+├── MEMORY.md         # 长期记忆（可手动编辑）
 ├── DREAMS.md         # 梦境/灵感笔记
 └── daily/
-    ├── 2026-06-01.md # 每日对话记录
-    ├── 2026-06-02.md
-    └── ...
+    └── 2026-06-10.md # 每日对话记录
 ```
 
-- **每次对话**自动追加到当日的 daily note。
-- **每次提问**时，系统从 `MEMORY.md` 中做关键词召回，把相关记忆注入 system prompt。
-- 你可以**手动编辑** `MEMORY.md` 写入长期知识（如个人偏好、项目信息）。
+- 每次对话自动写入当日 daily note。
+- 每次提问会从 `MEMORY.md` 做关键词召回，相关条目注入 system prompt。
+- 可手动编辑 `MEMORY.md` 写入长期知识（个人偏好、项目信息等）。
 
 ---
 
 ## 程序化调用（Library API）
 
-AIRIClaw 也可以作为 npm 包在你自己的项目中使用：
-
 ```ts
-import { Assistant, loadConfig, EventBus } from 'airiclaw'
+import { Assistant, loadConfig } from 'airiclaw'
 
-// 加载配置
-const config = await loadConfig()
-
-// 创建助手实例
-const assistant = new Assistant({ config })
+const assistant = new Assistant({ config: await loadConfig() })
 await assistant.loadSkills()
 
-// 监听事件（用于接入前端/语音）
+// 流式文字
 assistant.events.on('output:gen-ai:chat:delta', ({ delta }) => {
-  process.stdout.write(delta)  // 流式文字
+  process.stdout.write(delta)
 })
 
-assistant.events.on('output:gen-ai:chat:complete', ({ message, usage }) => {
+// 回合完成（含 token 用量）
+assistant.events.on('output:gen-ai:chat:complete', ({ usage }) => {
   console.log(`\n[tokens: ${usage.totalTokens}]`)
 })
 
-// 对话
 const { text } = await assistant.chat('你好！')
-console.log(text)
 ```
 
 ### 接入数字人前端
 
-如果你有 Live2D/VRM 渲染器，通过事件接入：
-
 ```ts
-// 口型同步
+// 口型同步（0~1）
 assistant.events.on('output:lipsync', ({ mouthOpen, vowel }) => {
-  avatar.setMouthOpen(mouthOpen) // 0~1
+  avatar.setMouthOpen(mouthOpen)
 })
 
 // 表情
@@ -348,14 +314,12 @@ assistant.events.on('output:emotion', ({ emotion, intensity }) => {
 })
 
 // 语音播放
-assistant.events.on('output:speech', ({ audio, text }) => {
+assistant.events.on('output:speech', ({ audio }) => {
   audioPlayer.play(audio)
 })
 ```
 
 ### Gateway 客户端
-
-连接 Gateway 进行远程调用：
 
 ```ts
 import WebSocket from 'ws'
@@ -363,23 +327,16 @@ import WebSocket from 'ws'
 const ws = new WebSocket('ws://localhost:18789')
 
 ws.on('open', () => {
-  // 发送 chat 请求
   ws.send(JSON.stringify({
-    type: 'req',
-    id: '1',
-    method: 'chat',
-    params: { text: '今天天气怎么样？' }
+    type: 'req', id: '1', method: 'chat',
+    params: { text: '今天天气怎么样？' },
   }))
 })
 
 ws.on('message', (data) => {
   const frame = JSON.parse(data.toString())
-  if (frame.type === 'res') {
-    console.log('回复:', frame.payload.text)
-  }
-  if (frame.type === 'event') {
-    console.log('事件:', frame.event, frame.payload)
-  }
+  if (frame.type === 'res') console.log('回复:', frame.payload.text)
+  if (frame.type === 'event') console.log('事件:', frame.event)
 })
 ```
 
@@ -388,55 +345,45 @@ ws.on('message', (data) => {
 ## 运行测试
 
 ```bash
-pnpm test          # 运行所有 78 个测试
+pnpm test          # 全部测试
 pnpm test:watch    # 监听模式
+pnpm typecheck     # 类型检查
 ```
 
 ---
 
 ## 常见问题
 
-### Q: 提示 "no DEEPSEEK_API_KEY set"
-
+**Q: 提示 "no DEEPSEEK_API_KEY set"**
 设置环境变量：`export DEEPSEEK_API_KEY=sk-...`
 
-### Q: 没有技能被发现
+**Q: 没有技能被发现**
+确认 `skillsDir` 下有 `*/SKILL.md`。用 `airiclaw status` 查看当前目录指向。
 
-确认 `skillsDir` 路径下有 `*/SKILL.md` 文件。可用 `airiclaw status` 查看当前 skillsDir 指向哪里。
+**Q: 想用 DeepSeek V4 Flash（更快更便宜）**
+`export AIRICLAW_MODEL=deepseek-v4-flash`，或在配置文件 `llm.model` 中设置。
 
-### Q: 想用 DeepSeek V4 Flash（更快更便宜）
-
-```bash
-export AIRICLAW_MODEL=deepseek-v4-flash
-```
-
-或在 `.airiclaw/config.json` 中：
-```json
-{ "llm": { "model": "deepseek-v4-flash" } }
-```
-
-### Q: 想用其他 OpenAI 兼容 API（如 OpenRouter）
-
+**Q: 想接其他 OpenAI 兼容 API（如 OpenRouter）**
 ```bash
 export AIRICLAW_BASE_URL=https://openrouter.ai/api/v1
 export DEEPSEEK_API_KEY=sk-or-...
 export AIRICLAW_MODEL=deepseek/deepseek-chat
 ```
 
-### Q: Gateway 怎么做身份验证
-
-当前版本的 Gateway 不含鉴权（仅监听 localhost）。生产部署请自行在前面加反向代理（nginx/caddy）+ token 校验。
+**Q: Gateway 如何鉴权**
+当前版本不含鉴权（建议仅监听 localhost）。生产部署请在前面加反向代理
+（nginx/caddy）+ token 校验。
 
 ---
 
-## 项目结构一览
+## 项目结构
 
 ```
 AIRIClaw/
 ├── src/
 │   ├── llm/         # LLM 契约 + DeepSeek V4 Pro provider
 │   ├── agent/       # 流式 agent 循环 + 工具调度
-│   ├── skills/      # SKILL.md 解析/注册/prompt 生成/工具适配
+│   ├── skills/      # SKILL.md 解析/注册/prompt/工具适配
 │   ├── character/   # 角色卡 + system prompt 构建
 │   ├── memory/      # 长期记忆 + 每日笔记 + 关键词召回
 │   ├── events/      # AIRI 协议事件总线
@@ -446,9 +393,6 @@ AIRIClaw/
 │   ├── config/      # 配置加载
 │   ├── index.ts     # 库入口
 │   └── cli.ts       # CLI 入口
-├── examples/
-│   ├── skills/      # 示例技能
-│   └── character/   # 示例角色卡
-├── dist/            # 构建产物
-└── package.json
+├── examples/        # 示例技能 + 角色卡
+└── docs/USAGE.md    # 本文档
 ```

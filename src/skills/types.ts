@@ -1,12 +1,11 @@
 /**
- * Type contracts for the SKILL.md skill system (OpenClaw 2026.5.31 compatible).
+ * Skill contracts — manifest, metadata, and policy shapes for SKILL.md files.
  *
- * Skills are markdown files (SKILL.md) with YAML/JSON frontmatter. OpenClaw-specific
- * metadata is nested under `metadata.openclaw`. A parsed Skill carries its manifest,
- * instructions (markdown body), and source location so it can later become a tool.
+ * Mirrors OpenClaw 2026.6.2 skill loading (frontmatter + openclaw metadata
+ * block) collapsed into a single local-first module.
  */
 
-/** A declarative installation recipe for a skill's external dependency. */
+/** One install option from the `metadata.openclaw.install[]` block. */
 export interface SkillInstallSpec {
   id: string
   kind: 'brew' | 'node' | 'go' | 'uv' | 'download'
@@ -16,23 +15,19 @@ export interface SkillInstallSpec {
   package?: string
   module?: string
   url?: string
-  archive?: string
-  extract?: boolean
-  stripComponents?: number
-  targetDir?: string
   bins?: string[]
 }
 
-/** Runtime prerequisites a skill needs in order to function. */
+/** Runtime prerequisites declared by a skill. */
 export interface SkillRequires {
   bins?: string[]
   env?: string[]
 }
 
-/** OpenClaw-specific metadata, normally nested under `metadata.openclaw`. */
+/** The `metadata.openclaw` block from SKILL.md frontmatter. */
 export interface SkillMetadata {
-  emoji?: string
   always?: boolean
+  emoji?: string
   homepage?: string
   skillKey?: string
   primaryEnv?: string
@@ -41,26 +36,40 @@ export interface SkillMetadata {
   install?: SkillInstallSpec[]
 }
 
-/** The fully resolved manifest derived from a SKILL.md's frontmatter. */
+/**
+ * Who may invoke the skill.
+ * Upstream defaults: `user-invocable` true, `disable-model-invocation` false.
+ */
+export interface SkillInvocationPolicy {
+  userInvocable: boolean
+  disableModelInvocation: boolean
+}
+
+/** Parsed frontmatter of a SKILL.md file. */
 export interface SkillManifest {
   name: string
   description: string
-  userInvocable?: boolean
-  disableModelInvocation?: boolean
+  policy: SkillInvocationPolicy
   metadata?: SkillMetadata
 }
 
-/** A parsed skill: manifest plus markdown instructions and source location. */
+/** A fully loaded skill: manifest + instruction body + provenance. */
 export interface Skill {
   manifest: SkillManifest
+  /** Trimmed markdown body below the frontmatter. */
   instructions: string
+  /** Absolute (or caller-provided) path to the SKILL.md file. */
   sourcePath: string
+  /** Directory containing the SKILL.md — relative paths resolve against it. */
   baseDir: string
+  /** The raw, unmodified file contents. */
   raw: string
 }
 
-/** Filter options for listing skills from the registry. */
+/** Filter options for SkillRegistry.list(). */
 export interface SkillFilter {
-  tag?: string
+  /** Only skills with policy.userInvocable === true. */
   invocableOnly?: boolean
+  /** Only skills with metadata.always === true. */
+  alwaysOnly?: boolean
 }

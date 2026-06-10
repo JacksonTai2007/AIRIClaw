@@ -1,38 +1,36 @@
 /**
- * Memory layer contracts, modelled on OpenClaw's memory-host-sdk: markdown
- * memory files (MEMORY.md / DREAMS.md / daily notes) are chunked, hashed, and
- * keyword-searched. Shapes mirror the SDK's `chunks` rows (hash, text, line
- * range) so a future embedding index can drop in without changing callers.
+ * Memory contracts — markdown-file-backed long-term memory
+ * (MEMORY.md / DREAMS.md / daily notes).
  */
 
-/** A contiguous slice of a markdown document. */
+/** One chunk of a markdown memory file. */
 export interface MemoryChunk {
-  /** Stable hex hash of the chunk text. */
+  /** FNV-1a hash (hex) of the chunk text — stable identity across reads. */
   hash: string
   text: string
-  /** Inclusive 1-based [startLine, endLine] within the source document. */
+  /** 1-based inclusive [startLine, endLine] in the source file. */
   lines: [number, number]
 }
 
-/** A scored chunk returned from a search. */
+/** A scored search hit. */
 export interface MemorySearchResult {
   chunk: MemoryChunk
   score: number
-  /** Where the chunk came from, e.g. 'memory'. */
+  /** Which store produced the hit, e.g. 'memory'. */
   source: string
 }
 
-/** A single parsed DREAMS.md entry. */
+/** One entry in DREAMS.md (consolidated / "dreamed" memories). */
 export interface DreamEntry {
   id: string
   text: string
-  /** Wall-clock creation time (ms epoch). */
+  /** ms epoch at parse time. */
   createdAt: number
-  /** Id of the memory this dream was promoted from, if any. */
+  /** Memory id this dream was promoted from, if any. */
   promotedFrom?: string
 }
 
-/** Filesystem locations for the memory files. */
+/** Filesystem layout of the memory store. */
 export interface MemoryPaths {
   memoryMd: string
   dreamsMd: string

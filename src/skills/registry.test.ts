@@ -1,116 +1,104 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { SkillRegistry } from './registry.js'
 import type { Skill } from './types.js'
 
 function makeSkill(
   name: string,
-  overrides: Partial<Skill['manifest']> = {},
+  overrides: {
+    description?: string
+    userInvocable?: boolean
+    disableModelInvocation?: boolean
+    always?: boolean
+    skillKey?: string
+  } = {},
 ): Skill {
   return {
     manifest: {
       name,
-      description: `Description for ${name}`,
-      ...overrides,
+      description: overrides.description ?? `${name} description`,
+      policy: {
+        userInvocable: overrides.userInvocable ?? true,
+        disableModelInvocation: overrides.disableModelInvocation ?? false,
+      },
+      metadata:
+        overrides.always !== undefined || overrides.skillKey !== undefined
+          ? { always: overrides.always, skillKey: overrides.skillKey }
+          : undefined,
     },
-    instructions: `Instructions for ${name}`,
+    instructions: 'body',
     sourcePath: `/skills/${name}/SKILL.md`,
     baseDir: `/skills/${name}`,
-    raw: `--- name: ${name} ---`,
+    raw: '',
   }
 }
 
 describe('SkillRegistry', () => {
   it('adds, gets, and reports size', () => {
-    const reg = new SkillRegistry()
-    expect(reg.size).toBe(0)
-    const s = makeSkill('alpha')
-    reg.add(s)
-    expect(reg.size).toBe(1)
-    expect(reg.get('alpha')).toBe(s)
-    expect(reg.get('missing')).toBeUndefined()
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('alpha'))
+    registry.add(makeSkill('beta'))
+    expect(registry.size).toBe(2)
+    expect(registry.get('alpha')?.manifest.name).toBe('alpha')
+    expect(registry.get('missing')).toBeUndefined()
+    expect(registry.all()).toHaveLength(2)
   })
 
-  it('replaces an existing skill with the same name', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('dup', { description: 'first' }))
-    reg.add(makeSkill('dup', { description: 'second' }))
-    expect(reg.size).toBe(1)
-    expect(reg.get('dup')?.manifest.description).toBe('second')
+  it('gets by skillKey', () => {
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('gifgrep', { skillKey: 'gif-grep' }))
+    expect(registry.get('gif-grep')?.manifest.name).toBe('gifgrep')
+    expect(registry.get('gifgrep')?.manifest.name).toBe('gifgrep')
   })
 
-  it('all() returns skills in insertion order', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('one'))
-    reg.add(makeSkill('two'))
-    reg.add(makeSkill('three'))
-    expect(reg.all().map((s) => s.manifest.name)).toEqual(['one', 'two', 'three'])
+  it('list filters by invocableOnly', () => {
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('open'))
+    registry.add(makeSkill('locked', { userInvocable: false }))
+    const invocable = registry.list({ invocableOnly: true })
+    expect(invocable.map((s) => s.manifest.name)).toEqual(['open'])
+    expect(registry.list()).toHaveLength(2)
   })
 
-  it('list() returns all skills when no filter is given', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('a'))
-    reg.add(makeSkill('b'))
-    expect(reg.list()).toHaveLength(2)
+  it('list filters by alwaysOnly', () => {
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('pinned', { always: true }))
+    registry.add(makeSkill('lazy'))
+    registry.add(makeSkill('explicit-off', { always: false }))
+    const always = registry.list({ alwaysOnly: true })
+    expect(always.map((s) => s.manifest.name)).toEqual(['pinned'])
   })
 
-  it('list() filters by invocableOnly (userInvocable === true)', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('invocable', { userInvocable: true }))
-    reg.add(makeSkill('not-invocable', { userInvocable: false }))
-    reg.add(makeSkill('unset'))
-    const result = reg.list({ invocableOnly: true })
-    expect(result.map((s) => s.manifest.name)).toEqual(['invocable'])
-  })
-
-  it('list() filters by tag against requires bins/env and name', () => {
-    const reg = new SkillRegistry()
-    reg.add(
-      makeSkill('ff', {
-        metadata: { requires: { bins: ['ffmpeg'] } },
-      }),
-    )
-    reg.add(
-      makeSkill('env-skill', {
-        metadata: { requires: { env: ['MY_TOKEN'] } },
-      }),
-    )
-    reg.add(makeSkill('plain'))
-
-    expect(reg.list({ tag: 'ffmpeg' }).map((s) => s.manifest.name)).toEqual(['ff'])
-    expect(reg.list({ tag: 'MY_TOKEN' }).map((s) => s.manifest.name)).toEqual([
-      'env-skill',
+  it('search matches name and description case-insensitively', () => {
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('github', { description: 'GitHub CLI for PRs' }))
+    registry.add(makeSkill('weather', { description: 'Forecast lookups' }))
+    expect(registry.search('GITHUB').map((s) => s.manifest.name)).toEqual([
+      'github',
     ])
-    expect(reg.list({ tag: 'plain' }).map((s) => s.manifest.name)).toEqual(['plain'])
-    expect(reg.list({ tag: 'nope' })).toHaveLength(0)
+    expect(registry.search('forecast').map((s) => s.manifest.name)).toEqual([
+      'weather',
+    ])
   })
 
-  it('search() does case-insensitive substring match over name + description', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('weather', { description: 'Get the forecast' }))
-    reg.add(makeSkill('notes', { description: 'Manage Apple Notes' }))
-
-    expect(reg.search('WEATH').map((s) => s.manifest.name)).toEqual(['weather'])
-    expect(reg.search('forecast').map((s) => s.manifest.name)).toEqual(['weather'])
-    expect(reg.search('apple').map((s) => s.manifest.name)).toEqual(['notes'])
-  })
-
-  it('search() with empty query returns all model-discoverable skills', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('a'))
-    reg.add(makeSkill('b'))
-    expect(reg.search('')).toHaveLength(2)
-  })
-
-  it('search() excludes skills with disableModelInvocation === true', () => {
-    const reg = new SkillRegistry()
-    reg.add(makeSkill('visible', { description: 'shared keyword' }))
-    reg.add(
-      makeSkill('hidden', {
+  it('search excludes model-disabled skills', () => {
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('visible', { description: 'shared keyword' }))
+    registry.add(
+      makeSkill('secret', {
         description: 'shared keyword',
         disableModelInvocation: true,
       }),
     )
-    const result = reg.search('shared')
-    expect(result.map((s) => s.manifest.name)).toEqual(['visible'])
+    expect(registry.search('shared').map((s) => s.manifest.name)).toEqual([
+      'visible',
+    ])
+  })
+
+  it('empty search query returns all model-invocable skills', () => {
+    const registry = new SkillRegistry()
+    registry.add(makeSkill('a'))
+    registry.add(makeSkill('b', { disableModelInvocation: true }))
+    registry.add(makeSkill('c'))
+    expect(registry.search('').map((s) => s.manifest.name)).toEqual(['a', 'c'])
   })
 })

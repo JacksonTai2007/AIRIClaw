@@ -1,15 +1,16 @@
 /**
- * The digital-human persona, distilled from Project AIRI's `AiriCard`. A
- * `CharacterCard` carries identity (name/description/personality), conversation
- * seeds (greetings/examples), the system-prompt scaffold, and the runtime
- * `modules` config that selects the consciousness / speech / avatar backends.
+ * Character card — AIRI v0.10.2 `AiriCard` flattened for a server-side runtime.
+ *
+ * Mirrors the shape of `@proj-airi/ccc`'s Card + the `extensions.airi.modules`
+ * block, collapsed into a single plain-JSON document.
  */
 
-/** Runtime backend selection for the character's faculties. */
+/** Per-module character configuration (AIRI `extensions.airi.modules`). */
 export interface CharacterModules {
-  /** The "brain" — the LLM that drives reasoning and chat. */
-  consciousness: { provider: string; model: string }
-  /** Optional text-to-speech voice configuration. */
+  consciousness: {
+    provider: string
+    model: string
+  }
   speech?: {
     provider: string
     model: string
@@ -18,7 +19,6 @@ export interface CharacterModules {
     rate?: number
     language?: string
   }
-  /** Optional avatar model (Live2D or VRM), loaded from a file or URL. */
   avatar?: {
     kind: 'live2d' | 'vrm'
     source: 'file' | 'url'
@@ -27,7 +27,7 @@ export interface CharacterModules {
   }
 }
 
-/** A complete digital-human character definition. */
+/** A complete character definition. */
 export interface CharacterCard {
   name: string
   version: string
@@ -38,66 +38,56 @@ export interface CharacterCard {
   greetings: string[]
   systemPrompt: string
   postHistoryInstructions?: string
-  /** Few-shot dialogue examples; each example is a list of turn strings. */
   messageExamples?: string[][]
   modules: CharacterModules
 }
 
-/** The built-in default persona. */
+/** Built-in default character. */
 export const DEFAULT_CHARACTER: CharacterCard = {
   name: 'AIRI',
-  version: '1.0.0',
-  description:
-    'AIRI is a local-first digital-human companion: a warm, curious AI who lives '
-    + 'alongside you, remembers what matters, and helps you think and build.',
+  version: '2.0.0',
+  description: 'AIRI is a local-first digital companion — a warm, curious assistant who lives on your machine and helps with anything from quick questions to long-running projects.',
   creator: 'AIRIClaw',
-  personality:
-    'Friendly, curious, and quietly confident. Speaks plainly and warmly, enjoys '
-    + 'learning new things, and is happy to dig into hard problems together. Honest '
-    + 'about uncertainty and never pretends to know what it does not.',
-  scenario: '',
-  greetings: ['Hi! I\'m AIRI. What are we working on today?'],
-  systemPrompt:
-    'You are AIRI, a helpful and personable digital-human assistant. Stay in '
-    + 'character, be concise, and use the tools and memories available to you.',
-  postHistoryInstructions: '',
-  messageExamples: [],
+  personality: 'Friendly, upbeat, and concise. Speaks naturally and gets to the point without rambling. Curious about the user\'s world, honest about uncertainty, and never condescending.',
+  greetings: [
+    'Hey! AIRI here — what are we up to today?',
+  ],
+  systemPrompt: 'You are AIRI, a helpful digital companion. Keep replies clear and concise, stay in character, and be genuinely useful.',
   modules: {
-    consciousness: { provider: 'deepseek', model: 'deepseek-v4-pro' },
+    consciousness: {
+      provider: 'deepseek',
+      model: 'deepseek-v4-pro',
+    },
   },
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
 /**
- * Validate a partial character card (an arbitrary JSON object) and merge it
- * over {@link DEFAULT_CHARACTER}. Top-level keys are shallow-merged; `modules`
- * is merged one level deep so a partial `modules` does not wipe the default
- * consciousness config. Throws if the resulting name or personality is empty.
+ * Load a character card from parsed JSON, shallow-merged over
+ * {@link DEFAULT_CHARACTER} (with `modules` merged one level deep).
  */
 export function loadCharacterCard(json: unknown): CharacterCard {
-  if (json === null || typeof json !== 'object' || Array.isArray(json))
-    throw new Error('loadCharacterCard: expected a JSON object')
+  if (!isPlainObject(json))
+    throw new TypeError(`Character card must be a plain object, got ${json === null ? 'null' : Array.isArray(json) ? 'array' : typeof json}`)
 
-  const partial = json as Partial<CharacterCard>
-
-  const mergedModules: CharacterModules = {
-    ...DEFAULT_CHARACTER.modules,
-    ...(partial.modules ?? {}),
-  }
+  const input = json as Partial<CharacterCard>
 
   const card: CharacterCard = {
     ...DEFAULT_CHARACTER,
-    ...partial,
-    modules: mergedModules,
+    ...input,
+    modules: {
+      ...DEFAULT_CHARACTER.modules,
+      ...(isPlainObject(input.modules) ? input.modules : {}),
+    },
   }
 
-  if (!card.modules.consciousness?.provider || !card.modules.consciousness?.model)
-    throw new Error('loadCharacterCard: modules.consciousness.provider and .model are required')
-
   if (typeof card.name !== 'string' || card.name.trim() === '')
-    throw new Error('loadCharacterCard: character "name" must be a non-empty string')
-
+    throw new Error('Character card is invalid: "name" must be a non-empty string')
   if (typeof card.personality !== 'string' || card.personality.trim() === '')
-    throw new Error('loadCharacterCard: character "personality" must be a non-empty string')
+    throw new Error('Character card is invalid: "personality" must be a non-empty string')
 
   return card
 }

@@ -1,32 +1,30 @@
 /**
- * Filesystem-backed memory store over the OpenClaw-style memory files:
- * MEMORY.md (long-term notes), DREAMS.md (promoted/reflective entries), and
- * daily/YYYY-MM-DD.md notes. Reads are lenient (missing files read as empty);
- * writes create parent directories on demand.
+ * File-backed memory store — MEMORY.md (append-only log), DREAMS.md
+ * (consolidated entries), and `daily/YYYY-MM-DD.md` notes.
  */
 
-import { dirname, join } from 'node:path'
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
-
-import { chunkMarkdown, keywordSearch, splitDreamEntries } from './markdown.js'
 import type { DreamEntry, MemoryPaths, MemorySearchResult } from './types.js'
 
-function isNotFound(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: string }).code === 'ENOENT'
-}
+import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
-/** Format a Date as a local YYYY-MM-DD string. */
-function ymd(date: Date): string {
-  const y = date.getFullYear()
-  const m = String(date.getMonth() + 1).padStart(2, '0')
-  const d = String(date.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
+import { chunkMarkdown, keywordSearch, splitDreamEntries } from './markdown.js'
+
+async function readFileOrEmpty(path: string): Promise<string> {
+  try {
+    return await readFile(path, 'utf8')
+  }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      return ''
+    throw error
+  }
 }
 
 export class MemoryStore {
   constructor(private readonly paths: MemoryPaths) {}
 
-  /** Default file layout under a base directory. */
+  /** Conventional layout under a base directory. */
   static defaultPaths(baseDir: string): MemoryPaths {
     return {
       memoryMd: join(baseDir, 'MEMORY.md'),
@@ -35,54 +33,33 @@ export class MemoryStore {
     }
   }
 
-  /** Read MEMORY.md, or '' if it does not exist yet. */
+  /** Full MEMORY.md contents, or '' if the file does not exist. */
   async readMemory(): Promise<string> {
-    return this.readFileOrEmpty(this.paths.memoryMd)
+    return readFileOrEmpty(this.paths.memoryMd)
   }
 
-  /** Append a timestamped bullet to MEMORY.md, creating it if needed. */
+  /** Append a timestamped `- [ISO] text` line to MEMORY.md. */
   async appendMemory(text: string): Promise<void> {
-    const bullet = `- [${new Date().toISOString()}] ${text.trim()}\n`
-    await this.appendCreating(this.paths.memoryMd, bullet)
+    await mkdir(dirname(this.paths.memoryMd), { recursive: true })
+    await appendFile(this.paths.memoryMd, `- [${new Date().toISOString()}] ${text}\n`, 'utf8')
   }
 
-  /** Read and parse DREAMS.md into entries, or [] if it does not exist. */
+  /** Parsed DREAMS.md entries ([] if the file does not exist). */
   async readDreams(): Promise<DreamEntry[]> {
-    const text = await this.readFileOrEmpty(this.paths.dreamsMd)
-    if (text === '')
-      return []
-    return splitDreamEntries(text)
+    return splitDreamEntries(await readFileOrEmpty(this.paths.dreamsMd))
   }
 
-  /** Append a note to daily/YYYY-MM-DD.md (defaults to today). */
+  /** Append a note to `dailyDir/YYYY-MM-DD.md`, separated by a blank line. */
   async appendDailyNote(text: string, date: Date = new Date()): Promise<void> {
-    const file = join(this.paths.dailyDir, `${ymd(date)}.md`)
-    const bullet = `- [${date.toISOString()}] ${text.trim()}\n`
-    await this.appendCreating(file, bullet)
+    await mkdir(this.paths.dailyDir, { recursive: true })
+    const path = join(this.paths.dailyDir, `${date.toISOString().slice(0, 10)}.md`)
+    const existing = await readFileOrEmpty(path)
+    await appendFile(path, existing === '' ? text : `\n\n${text}`, 'utf8')
   }
 
-  /** Keyword-search MEMORY.md and return the top matching chunks. */
+  /** Keyword search over chunked MEMORY.md. */
   async search(query: string, limit?: number): Promise<MemorySearchResult[]> {
-    const text = await this.readMemory()
-    if (text === '')
-      return []
-    const chunks = chunkMarkdown(text)
+    const chunks = chunkMarkdown(await this.readMemory())
     return keywordSearch(chunks, query, limit)
-  }
-
-  private async readFileOrEmpty(path: string): Promise<string> {
-    try {
-      return await readFile(path, 'utf8')
-    }
-    catch (err) {
-      if (isNotFound(err))
-        return ''
-      throw err
-    }
-  }
-
-  private async appendCreating(path: string, content: string): Promise<void> {
-    await mkdir(dirname(path), { recursive: true })
-    await appendFile(path, content, 'utf8')
   }
 }

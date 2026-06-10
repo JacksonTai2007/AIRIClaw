@@ -1,3 +1,3 @@
-export * from './types.js'
-export * from './markdown.js'
-export * from './store.js'
+export { chunkMarkdown, keywordSearch, splitDreamEntries } from './markdown.js'
+export { MemoryStore } from './store.js'
+export type { DreamEntry, MemoryChunk, MemoryPaths, MemorySearchResult } from './types.js'

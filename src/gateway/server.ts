@@ -1,11 +1,12 @@
 /**
- * WebSocket gateway server. Handles request/response RPC over the frame
- * protocol and fans out EventBus protocol events to every connected client.
+ * Minimal OpenClaw-style gateway server: a WebSocket endpoint that dispatches
+ * `req` frames to registered method handlers and (optionally) fans out
+ * {@link EventBus} events to every connected client as `event` frames.
  */
 
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
-import type { EventBus } from '../events/index.js'
+import type { EventBus, Unsubscribe } from '../events/bus.js'
 import {
   GATEWAY_DEFAULT_PORT,
   createErrorResponse,
@@ -13,8 +14,8 @@ import {
   createResponse,
   isRequest,
   parseFrame,
+  type GatewayFrame,
 } from './frames.js'
-import type { GatewayFrame } from './frames.js'
 
 export type MethodHandler = (
   params: unknown,
@@ -27,114 +28,95 @@ export interface GatewayServerOptions {
 }
 
 export class GatewayServer {
-  private readonly port: number
-  private readonly bus?: EventBus
+  private readonly options: GatewayServerOptions
   private readonly handlers = new Map<string, MethodHandler>()
-  private readonly clients = new Map<string, WebSocket>()
-  private wss?: WebSocketServer
-  private busUnsubscribe?: () => void
+  private wss: WebSocketServer | null = null
+  private busUnsubscribe: Unsubscribe | null = null
   private seq = 0
 
   constructor(options: GatewayServerOptions = {}) {
-    this.port = options.port ?? GATEWAY_DEFAULT_PORT
-    this.bus = options.bus
+    this.options = options
   }
 
   register(method: string, handler: MethodHandler): void {
     this.handlers.set(method, handler)
   }
 
-  /** Actual bound port (useful when constructed with port:0). */
-  get address(): number | undefined {
+  /** Actual bound address (available after {@link start} resolves). */
+  get address(): { port: number } | null {
     const addr = this.wss?.address()
-    if (addr && typeof addr === 'object') return addr.port
-    return undefined
+    if (!addr || typeof addr === 'string') return null
+    return { port: addr.port }
   }
 
-  async start(): Promise<void> {
-    if (this.wss) return
-    const wss = new WebSocketServer({ port: this.port })
-    this.wss = wss
+  start(): Promise<void> {
+    if (this.wss) return Promise.resolve()
 
-    wss.on('connection', (socket) => {
-      const connId = randomUUID()
-      this.clients.set(connId, socket)
+    return new Promise<void>((resolve, reject) => {
+      const wss = new WebSocketServer({ port: this.options.port ?? GATEWAY_DEFAULT_PORT })
+      this.wss = wss
 
-      socket.on('message', (data) => {
-        void this.handleMessage(connId, socket, data.toString())
-      })
-
-      socket.on('close', () => {
-        this.clients.delete(connId)
-      })
-
-      socket.on('error', () => {
-        this.clients.delete(connId)
-      })
-    })
-
-    if (this.bus) {
-      this.busUnsubscribe = this.bus.onAny((event, payload) => {
-        this.broadcast(createEvent(event, payload, this.seq++))
-      })
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const onError = (err: Error) => reject(err)
-      wss.once('error', onError)
+      wss.once('error', reject)
       wss.once('listening', () => {
-        wss.off('error', onError)
+        wss.removeListener('error', reject)
         resolve()
       })
+
+      wss.on('connection', (socket) => {
+        const connId = randomUUID()
+        socket.on('message', (data) => {
+          void this.handleMessage(socket, connId, data.toString())
+        })
+      })
+
+      if (this.options.bus) {
+        this.busUnsubscribe = this.options.bus.onAny((event, payload) => {
+          this.broadcast(createEvent(event, payload, ++this.seq))
+        })
+      }
     })
   }
 
-  private async handleMessage(connId: string, socket: WebSocket, raw: string): Promise<void> {
+  private async handleMessage(socket: WebSocket, connId: string, raw: string): Promise<void> {
     let frame: GatewayFrame
     try {
       frame = parseFrame(raw)
-    } catch (err) {
-      // Best-effort: try to recover an id from the raw payload so the client can
-      // correlate the failure; otherwise just close politely.
-      const id = extractId(raw)
-      if (id) {
-        this.send(socket, createErrorResponse(id, 'bad_frame', (err as Error).message))
-      } else {
-        socket.close(1003, 'invalid frame')
-      }
+    } catch (error) {
+      this.send(
+        socket,
+        createErrorResponse(
+          'unknown',
+          'bad_frame',
+          error instanceof Error ? error.message : String(error),
+        ),
+      )
       return
     }
 
-    // The gateway only acts on requests; responses/events from clients are
-    // ignored.
+    // Clients only issue requests; ignore stray res/event frames.
     if (!isRequest(frame)) return
 
     const handler = this.handlers.get(frame.method)
     if (!handler) {
       this.send(
         socket,
-        createErrorResponse(frame.id, 'unknown_method', `no handler for method "${frame.method}"`),
+        createErrorResponse(frame.id, 'unknown_method', `unknown method: ${frame.method}`),
       )
       return
     }
 
     try {
-      const payload = await handler(frame.params, { connId })
-      this.send(socket, createResponse(frame.id, payload))
-    } catch (err) {
+      const result = await handler(frame.params, { connId })
+      this.send(socket, createResponse(frame.id, result))
+    } catch (error) {
       this.send(
         socket,
-        createErrorResponse(frame.id, 'handler_error', (err as Error).message ?? 'handler failed'),
+        createErrorResponse(
+          frame.id,
+          'handler_error',
+          error instanceof Error ? error.message : String(error),
+        ),
       )
-    }
-  }
-
-  broadcast(frame: GatewayFrame): void {
-    const data = JSON.stringify(frame)
-    for (const socket of this.clients.values()) {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(data)
-      }
     }
   }
 
@@ -144,36 +126,29 @@ export class GatewayServer {
     }
   }
 
-  async stop(): Promise<void> {
-    this.busUnsubscribe?.()
-    this.busUnsubscribe = undefined
-
-    for (const socket of this.clients.values()) {
-      try {
-        socket.close()
-      } catch {
-        // ignore
+  broadcast(frame: GatewayFrame): void {
+    if (!this.wss) return
+    const data = JSON.stringify(frame)
+    for (const client of this.wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(data)
       }
     }
-    this.clients.clear()
+  }
+
+  stop(): Promise<void> {
+    this.busUnsubscribe?.()
+    this.busUnsubscribe = null
 
     const wss = this.wss
-    if (!wss) return
-    this.wss = undefined
-    await new Promise<void>((resolve, reject) => {
-      wss.close((err) => (err ? reject(err) : resolve()))
+    this.wss = null
+    if (!wss) return Promise.resolve()
+
+    for (const client of wss.clients) {
+      client.terminate()
+    }
+    return new Promise<void>((resolve, reject) => {
+      wss.close((error) => (error ? reject(error) : resolve()))
     })
   }
-}
-
-function extractId(raw: string): string | undefined {
-  try {
-    const value = JSON.parse(raw)
-    if (value && typeof value === 'object' && typeof value.id === 'string') {
-      return value.id
-    }
-  } catch {
-    // ignore
-  }
-  return undefined
 }

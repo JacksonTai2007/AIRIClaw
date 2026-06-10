@@ -1,7 +1,6 @@
 /**
- * Render skills into an `<available_skills>` XML block for the system prompt.
- * Mirrors OpenClaw's `formatSkillsForPrompt`: a header explaining how to load a
- * skill, followed by one `<skill>` entry per (non-disabled) skill.
+ * System-prompt surface for skills — an <available_skills> XML block, in the
+ * spirit of OpenClaw's formatSkillsForPrompt (skill-contract.ts).
  */
 
 import type { Skill } from './types.js'
@@ -16,38 +15,33 @@ function escapeXml(str: string): string {
 }
 
 /**
- * Produce the `<available_skills>` block. Skills with model invocation disabled
- * are omitted. Returns '' when there are no skills to advertise.
+ * Renders model-invocable skills as an <available_skills> block.
+ * Returns '' when nothing is visible to the model.
  */
 export function formatSkillsForPrompt(skills: Skill[]): string {
-  const visible = skills.filter((s) => s.manifest.disableModelInvocation !== true)
+  const visible = skills.filter(
+    (skill) => skill.manifest.policy.disableModelInvocation !== true,
+  )
   if (visible.length === 0) {
     return ''
   }
-
-  const lines: string[] = [
-    '\n\nThe following skills provide specialized instructions for specific tasks.',
-    "Use the read tool to load a skill's file when the task matches its description.",
-    'When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.',
-    '',
-    '<available_skills>',
-  ]
-
+  const lines = ['<available_skills>']
   for (const skill of visible) {
-    const m = skill.manifest
     lines.push('  <skill>')
-    lines.push(`    <name>${escapeXml(m.name)}</name>`)
-    lines.push(`    <description>${escapeXml(m.description)}</description>`)
-    if (m.metadata?.emoji) {
-      lines.push(`    <emoji>${escapeXml(m.metadata.emoji)}</emoji>`)
+    lines.push(`    <name>${escapeXml(skill.manifest.name)}</name>`)
+    lines.push(
+      `    <description>${escapeXml(skill.manifest.description)}</description>`,
+    )
+    const emoji = skill.manifest.metadata?.emoji
+    if (emoji) {
+      lines.push(`    <emoji>${escapeXml(emoji)}</emoji>`)
     }
-    if (m.metadata?.homepage) {
-      lines.push(`    <homepage>${escapeXml(m.metadata.homepage)}</homepage>`)
+    const homepage = skill.manifest.metadata?.homepage
+    if (homepage) {
+      lines.push(`    <homepage>${escapeXml(homepage)}</homepage>`)
     }
-    lines.push(`    <location>${escapeXml(skill.sourcePath)}</location>`)
     lines.push('  </skill>')
   }
-
   lines.push('</available_skills>')
   return lines.join('\n')
 }

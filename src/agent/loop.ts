@@ -1,21 +1,16 @@
 /**
- * Core streaming agent loop. Calls the LLM, forwards token/reasoning deltas,
- * executes any requested tool calls, and iterates until the model stops asking
- * for tools or maxTurns is reached.
+ * The agent loop — streams LLM turns, executes requested tool calls, and
+ * iterates until the model stops asking for tools (or maxTurns is hit).
  */
 
-import type {
-  ChatRequest,
-  LLMProvider,
-  TokenUsage,
-} from '../llm/types.js'
-import { runToolCalls } from './tools.js'
+import type { ChatRequest, LLMProvider, TokenUsage } from '../llm/types.js'
 import type {
   AgentContext,
   AgentEventSink,
   AgentLoopConfig,
   AgentMessage,
 } from './types.js'
+import { runToolCalls } from './tools.js'
 
 const DEFAULT_MAX_TURNS = 12
 
@@ -25,76 +20,71 @@ export async function agentLoop(
   config: AgentLoopConfig,
   sink: AgentEventSink,
 ): Promise<AgentMessage[]> {
-  const maxTurns = config.maxTurns ?? DEFAULT_MAX_TURNS
-  const executionMode = config.toolExecutionMode ?? 'parallel'
-  const messages: AgentMessage[] = [...context.messages]
+  const working: AgentMessage[] = [...context.messages]
   const usage: TokenUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+  const maxTurns = config.maxTurns ?? DEFAULT_MAX_TURNS
+  const hasTools = context.tools.length > 0
 
   try {
     sink({ type: 'agent_start' })
 
     for (let turn = 1; turn <= maxTurns; turn++) {
       sink({ type: 'turn_start', turn })
+      sink({ type: 'message_start', turn })
 
       const request: ChatRequest = {
         messages: [
           { role: 'system', content: context.systemPrompt },
-          ...messages,
+          ...working,
         ],
-        ...(context.tools.length > 0
-          ? { tools: context.tools, toolChoice: 'auto' as const }
-          : {}),
+        ...(hasTools ? { tools: context.tools, toolChoice: 'auto' as const } : {}),
         ...(config.temperature !== undefined ? { temperature: config.temperature } : {}),
         ...(config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
         ...(config.signal ? { signal: config.signal } : {}),
       }
 
       const response = await provider.stream(request, (ev) => {
-        switch (ev.type) {
-          case 'text-delta':
-            sink({ type: 'text_delta', text: ev.text })
-            break
-          case 'reasoning-delta':
-            sink({ type: 'reasoning_delta', text: ev.text })
-            break
-          case 'tool-call':
-            sink({ type: 'tool_call', call: ev.toolCall })
-            break
-          case 'error':
-            sink({ type: 'error', error: ev.error })
-            break
-          default:
-            break
+        if (ev.type === 'text-delta') {
+          sink({ type: 'message_update', delta: ev.text, channel: 'text' })
+        } else if (ev.type === 'reasoning-delta') {
+          sink({ type: 'message_update', delta: ev.text, channel: 'reasoning' })
+        } else if (ev.type === 'error') {
+          sink({ type: 'error', error: ev.error })
         }
+        // 'tool-call' stream events are intentionally not forwarded — tool
+        // calls are reported via tool_execution_start below.
       })
 
-      // Accumulate usage across turns.
+      const assistantMessage: AgentMessage = { ...response.message, createdAt: Date.now() }
+      working.push(assistantMessage)
+      sink({ type: 'message_end', message: assistantMessage })
+
       usage.promptTokens += response.usage.promptTokens
       usage.completionTokens += response.usage.completionTokens
       usage.totalTokens += response.usage.totalTokens
 
-      const assistantMessage: AgentMessage = { ...response.message }
-      messages.push(assistantMessage)
-      sink({ type: 'message_end', message: assistantMessage })
-
       const toolCalls = assistantMessage.tool_calls
-      if (toolCalls && toolCalls.length > 0 && config.executeTool) {
+      if (toolCalls?.length && config.executeTool) {
+        for (const call of toolCalls) {
+          sink({ type: 'tool_execution_start', call })
+        }
+
         const results = await runToolCalls(
           toolCalls,
           config.executeTool,
-          executionMode,
+          config.toolExecutionMode ?? 'parallel',
           config.signal,
         )
 
         for (const result of results) {
-          const toolMessage: AgentMessage = {
+          sink({ type: 'tool_execution_end', result })
+          working.push({
             role: 'tool',
             content: result.content,
             tool_call_id: result.toolCallId,
             name: result.name,
-          }
-          messages.push(toolMessage)
-          sink({ type: 'tool_result', result })
+            createdAt: Date.now(),
+          })
         }
 
         sink({ type: 'turn_end', turn })
@@ -105,11 +95,11 @@ export async function agentLoop(
       break
     }
 
-    sink({ type: 'agent_end', messages, usage })
-    return messages
-  } catch (error) {
-    const err = error instanceof Error ? error : new Error(String(error))
-    sink({ type: 'error', error: err })
+    sink({ type: 'agent_end', messages: working, usage })
+    return working
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error(String(err))
+    sink({ type: 'error', error })
     throw err
   }
 }

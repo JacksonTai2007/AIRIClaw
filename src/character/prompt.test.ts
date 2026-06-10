@@ -1,67 +1,70 @@
+import type { CharacterCard } from './card.js'
+
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_CHARACTER, type CharacterCard } from './card.js'
 import { buildSystemPrompt } from './prompt.js'
 
-function makeCard(overrides: Partial<CharacterCard> = {}): CharacterCard {
-  return { ...DEFAULT_CHARACTER, ...overrides }
+const card: CharacterCard = {
+  name: 'Test',
+  version: '1.0.0',
+  description: 'DESC',
+  personality: 'PERSONA',
+  scenario: 'SCENE',
+  greetings: ['hi'],
+  systemPrompt: 'SYSTEM',
+  postHistoryInstructions: 'POST',
+  modules: { consciousness: { provider: 'deepseek', model: 'deepseek-v4-pro' } },
 }
 
 describe('buildSystemPrompt', () => {
-  it('fuses components in the documented order', () => {
-    const card = makeCard({
-      systemPrompt: 'SYS',
-      description: 'DESC',
-      personality: 'PERS',
-      scenario: 'SCEN',
-      postHistoryInstructions: 'POST',
-    })
-
-    const out = buildSystemPrompt(card, {
-      skills: '<available_skills>SK</available_skills>',
-      memory: 'MEM',
+  it('joins all segments in exact order with blank lines', () => {
+    const prompt = buildSystemPrompt(card, {
+      skills: 'SKILLS',
+      memory: 'MEMORY',
       contexts: ['CTX1', 'CTX2'],
     })
 
-    expect(out).toBe(
-      [
-        'SYS',
-        'DESC',
-        'Personality:\nPERS',
-        'Scenario:\nSCEN',
-        '<available_skills>SK</available_skills>',
-        '# Long-term memory\nMEM',
-        'CTX1',
-        'CTX2',
-        'POST',
-      ].join('\n\n'),
+    expect(prompt).toBe([
+      'SYSTEM',
+      'DESC',
+      'Personality:\nPERSONA',
+      'Scenario:\nSCENE',
+      'SKILLS',
+      '# Long-term memory\nMEMORY',
+      'CTX1',
+      'CTX2',
+      'POST',
+    ].join('\n\n'))
+  })
+
+  it('omits empty and blank segments', () => {
+    const sparse: CharacterCard = {
+      ...card,
+      systemPrompt: '',
+      scenario: '   ',
+      postHistoryInstructions: undefined,
+    }
+
+    const prompt = buildSystemPrompt(sparse, {
+      skills: '',
+      contexts: ['', '  ', 'CTX'],
+    })
+
+    expect(prompt).toBe('DESC\n\nPersonality:\nPERSONA\n\nCTX')
+  })
+
+  it('works with no parts at all', () => {
+    expect(buildSystemPrompt(card)).toBe(
+      'SYSTEM\n\nDESC\n\nPersonality:\nPERSONA\n\nScenario:\nSCENE\n\nPOST',
     )
   })
 
-  it('omits empty parts', () => {
-    const card = makeCard({
-      systemPrompt: 'SYS',
-      description: '',
-      personality: 'PERS',
-      scenario: '',
-      postHistoryInstructions: '',
-    })
+  it('includes the memory header only when memory is non-empty', () => {
+    expect(buildSystemPrompt(card, { memory: 'remember this' }))
+      .toContain('# Long-term memory\nremember this')
 
-    const out = buildSystemPrompt(card)
-
-    expect(out).toBe(['SYS', 'Personality:\nPERS'].join('\n\n'))
-    expect(out).not.toContain('Scenario:')
-    expect(out).not.toContain('Long-term memory')
-  })
-
-  it('includes skills and memory blocks when provided', () => {
-    const card = makeCard({ systemPrompt: 'SYS' })
-    const out = buildSystemPrompt(card, {
-      skills: '<available_skills>do_thing</available_skills>',
-      memory: 'user likes tea',
-    })
-
-    expect(out).toContain('<available_skills>do_thing</available_skills>')
-    expect(out).toContain('# Long-term memory\nuser likes tea')
+    expect(buildSystemPrompt(card)).not.toContain('# Long-term memory')
+    expect(buildSystemPrompt(card, { memory: '' })).not.toContain('# Long-term memory')
+    expect(buildSystemPrompt(card, { memory: '   ' })).not.toContain('# Long-term memory')
   })
 })

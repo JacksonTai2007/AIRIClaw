@@ -1,6 +1,5 @@
 /**
- * Application configuration. Loaded from `.airiclaw/config.json` in the working
- * directory (or a path passed explicitly) and overlaid with environment vars.
+ * Application configuration: `.airiclaw/config.json` overlaid with env vars.
  */
 
 import type { LLMConfig } from '../llm/types.js'
@@ -9,13 +8,13 @@ import { DEEPSEEK_DEFAULTS } from '../llm/types.js'
 export interface AppConfig {
   /** LLM provider configuration. Defaults to DeepSeek V4 Pro. */
   llm: LLMConfig
-  /** Path to a character card JSON file (persona). Optional — uses the default persona. */
+  /** Path to a character card JSON file. Optional — falls back to the default persona. */
   characterPath?: string
   /** Directory scanned recursively for SKILL.md skills. */
   skillsDir: string
   /** Base directory for memory files (MEMORY.md, DREAMS.md, daily/). */
   memoryDir: string
-  /** Gateway server port. */
+  /** Gateway server port (OpenClaw frame protocol v4). */
   gatewayPort: number
   /** Max LLM round-trips per agent run. */
   maxTurns: number

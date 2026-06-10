@@ -1,15 +1,15 @@
 /**
- * Safe no-op TTS/STT providers for headless mode (no audio hardware or cloud
- * credentials required).
+ * Headless voice providers — useful defaults when no real TTS/STT engine is
+ * configured (CI, server-only deployments, tests).
  */
 
 import type {
-  STTProvider,
   SpeechSynthesisRequest,
   SpeechSynthesisResult,
-  TTSProvider,
+  STTProvider,
   TranscriptionRequest,
   TranscriptionResult,
+  TTSProvider,
 } from './types.js'
 
 export class NoopTTS implements TTSProvider {

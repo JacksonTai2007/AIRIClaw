@@ -1,10 +1,9 @@
 /**
  * AIRIClaw — a local-first Agent + digital-human assistant.
  *
- * Fuses OpenClaw's agent/skill/gateway runtime with Project AIRI's character
+ * OpenClaw's agent/skill/gateway runtime fused with Project AIRI's character
  * and event protocol, powered by DeepSeek V4 Pro.
  *
- * Public API surface. Import sub-namespaces as needed:
  *   import { Assistant, loadConfig, DeepSeekProvider } from 'airiclaw'
  */
 

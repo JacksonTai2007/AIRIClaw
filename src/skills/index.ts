@@ -1,10 +1,16 @@
-/**
- * Public surface of the SKILL.md skill system.
- */
+/** Skills module barrel. */
 
-export * from './types.js'
-export * from './frontmatter.js'
-export * from './registry.js'
-export * from './discovery.js'
-export * from './prompt.js'
-export * from './tool-adapter.js'
+export type {
+  Skill,
+  SkillFilter,
+  SkillInstallSpec,
+  SkillInvocationPolicy,
+  SkillManifest,
+  SkillMetadata,
+  SkillRequires,
+} from './types.js'
+export { parseSkillMarkdown, resolveOpenClawMetadata, resolveSkillKey } from './frontmatter.js'
+export { SkillRegistry } from './registry.js'
+export { discoverSkills, loadSkillRegistry } from './discovery.js'
+export { formatSkillsForPrompt } from './prompt.js'
+export { skillToTool, skillsToTools } from './tool-adapter.js'

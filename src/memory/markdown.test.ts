@@ -3,95 +3,118 @@ import { describe, expect, it } from 'vitest'
 import { chunkMarkdown, keywordSearch, splitDreamEntries } from './markdown.js'
 
 describe('chunkMarkdown', () => {
-  it('produces chunks with 1-based line ranges and stable hashes', () => {
-    const md = [
-      '# Title', // 1
-      'intro line', // 2
-      '', // 3
-      '## Section', // 4
-      'body one', // 5
-      'body two', // 6
+  it('splits at headings and blank lines with 1-based line ranges', () => {
+    const text = [
+      '# Title', // line 1
+      'intro line', // line 2
+      '', // line 3
+      'paragraph two', // line 4
+      'still paragraph two', // line 5
+      '## Section', // line 6
+      'section body', // line 7
     ].join('\n')
 
-    const chunks = chunkMarkdown(md)
+    const chunks = chunkMarkdown(text)
 
-    expect(chunks).toHaveLength(2)
-    expect(chunks[0]!.lines).toEqual([1, 2])
-    expect(chunks[0]!.text).toBe('# Title\nintro line')
-    expect(chunks[1]!.lines).toEqual([4, 6])
-    expect(chunks[1]!.text).toBe('## Section\nbody one\nbody two')
-
-    // Hash is hex and stable across runs.
-    expect(chunks[0]!.hash).toMatch(/^[0-9a-f]+$/)
-    expect(chunkMarkdown(md)[0]!.hash).toBe(chunks[0]!.hash)
+    expect(chunks.map(c => c.text)).toEqual([
+      '# Title\nintro line',
+      'paragraph two\nstill paragraph two',
+      '## Section\nsection body',
+    ])
+    expect(chunks.map(c => c.lines)).toEqual([
+      [1, 2],
+      [4, 5],
+      [6, 7],
+    ])
   })
 
-  it('skips empty chunks', () => {
-    expect(chunkMarkdown('\n\n  \n\n')).toEqual([])
+  it('skips blank chunks', () => {
+    expect(chunkMarkdown('')).toEqual([])
+    expect(chunkMarkdown('\n\n   \n\n')).toEqual([])
+  })
+
+  it('produces stable hex hashes per chunk text', () => {
+    const [a] = chunkMarkdown('hello world')
+    const [b] = chunkMarkdown('hello world')
+    const [c] = chunkMarkdown('different text')
+
+    expect(a?.hash).toMatch(/^[0-9a-f]{8}$/)
+    expect(a?.hash).toBe(b?.hash)
+    expect(a?.hash).not.toBe(c?.hash)
   })
 })
 
 describe('keywordSearch', () => {
-  it('ranks chunks by occurrence count, descending', () => {
-    const chunks = chunkMarkdown(
-      [
-        'apple apple banana', // 3 occ of apple-ish
-        '',
-        'apple once',
-        '',
-        'no fruit here',
-      ].join('\n'),
-    )
+  const chunks = chunkMarkdown([
+    'cats are great, cats purr, cats nap', // 3x cats
+    '',
+    'one cats mention here', // 1x cats
+    '',
+    'dogs only', // 0x cats
+    '',
+    'cats and dogs together, cats again, dogs bark', // 2x cats + 2x dogs
+  ].join('\n'))
 
-    const results = keywordSearch(chunks, 'apple')
+  it('scores total term occurrences and sorts descending', () => {
+    const results = keywordSearch(chunks, 'cats')
 
-    expect(results).toHaveLength(2)
-    expect(results[0]!.score).toBe(2)
-    expect(results[0]!.chunk.text).toContain('apple apple')
-    expect(results[1]!.score).toBe(1)
-    expect(results[0]!.source).toBe('memory')
+    expect(results.map(r => r.score)).toEqual([3, 2, 1])
+    expect(results[0]?.chunk.text).toContain('cats purr')
+    expect(results.every(r => r.source === 'memory')).toBe(true)
   })
 
-  it('respects the limit and excludes zero-score chunks', () => {
-    const chunks = chunkMarkdown(['cat dog', '', 'cat', '', 'cat'].join('\n'))
-    const results = keywordSearch(chunks, 'cat', 2)
-    expect(results).toHaveLength(2)
-    expect(results.every(r => r.score > 0)).toBe(true)
+  it('sums across multiple lowercase terms', () => {
+    const results = keywordSearch(chunks, 'CATS Dogs')
+    expect(results[0]?.score).toBe(4) // 2 cats + 2 dogs
+    expect(results[0]?.chunk.text).toContain('together')
   })
 
-  it('returns nothing for an empty query', () => {
-    const chunks = chunkMarkdown('hello world')
-    expect(keywordSearch(chunks, '   ')).toEqual([])
+  it('excludes zero-score chunks and respects limit', () => {
+    expect(keywordSearch(chunks, 'zebra')).toEqual([])
+
+    const limited = keywordSearch(chunks, 'cats', 2)
+    expect(limited).toHaveLength(2)
+    expect(limited.map(r => r.score)).toEqual([3, 2])
   })
 })
 
 describe('splitDreamEntries', () => {
-  it('parses heading-delimited entries with promoted-from', () => {
-    const md = [
+  it('splits on ## headings and --- rules', () => {
+    const text = [
       '## First Dream',
-      'I dreamt of databases.',
-      'promoted-from: mem-42',
-      '',
-      '## Second Dream',
-      'A second reverie.',
+      'body one',
+      '## Second Dream!',
+      'body two',
+      '---',
+      'an untitled dream',
     ].join('\n')
 
-    const entries = splitDreamEntries(md)
+    const entries = splitDreamEntries(text)
 
-    expect(entries).toHaveLength(2)
-    expect(entries[0]!.id).toBe('first-dream')
-    expect(entries[0]!.text).toBe('I dreamt of databases.')
-    expect(entries[0]!.promotedFrom).toBe('mem-42')
-    expect(entries[1]!.id).toBe('second-dream')
-    expect(entries[1]!.promotedFrom).toBeUndefined()
+    expect(entries).toHaveLength(3)
+    expect(entries[0]?.id).toBe('first-dream')
+    expect(entries[0]?.text).toBe('## First Dream\nbody one')
+    expect(entries[1]?.id).toBe('second-dream')
+    expect(entries[2]?.id).toBe('dream-2')
+    expect(entries[2]?.text).toBe('an untitled dream')
+    expect(entries.every(e => typeof e.createdAt === 'number' && e.createdAt > 0)).toBe(true)
   })
 
-  it('parses rule-delimited entries and falls back to index ids', () => {
-    const md = ['no heading here', '---', 'another block'].join('\n')
-    const entries = splitDreamEntries(md)
-    expect(entries).toHaveLength(2)
-    expect(entries[0]!.id).toBe('0')
-    expect(entries[1]!.id).toBe('1')
-    expect(entries[0]!.text).toBe('no heading here')
+  it('parses promoted-from lines', () => {
+    const entries = splitDreamEntries([
+      '## Promoted Dream',
+      'promoted-from: mem-123',
+      'body',
+      '---',
+      'plain dream',
+    ].join('\n'))
+
+    expect(entries[0]?.promotedFrom).toBe('mem-123')
+    expect(entries[1]?.promotedFrom).toBeUndefined()
+  })
+
+  it('skips blank segments', () => {
+    expect(splitDreamEntries('')).toEqual([])
+    expect(splitDreamEntries('---\n\n---')).toEqual([])
   })
 })

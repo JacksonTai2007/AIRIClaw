@@ -10,15 +10,15 @@
  *   airiclaw status              print resolved config + provider info
  */
 
-import { mkdir, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { stdin, stdout } from 'node:process'
-import { loadConfig, configTemplate } from './config/index.js'
-import { loadCharacterCard, DEFAULT_CHARACTER, type CharacterCard } from './character/index.js'
+import { configTemplate, loadConfig } from './config/index.js'
+import { DEFAULT_CHARACTER, loadCharacterCard, type CharacterCard } from './character/index.js'
 import { loadSkillRegistry } from './skills/index.js'
 import { Assistant } from './runtime/index.js'
-import { GatewayServer, GATEWAY_DEFAULT_PORT } from './gateway/index.js'
+import { GATEWAY_DEFAULT_PORT, GatewayServer } from './gateway/index.js'
 import { DEEPSEEK_DEFAULTS } from './llm/index.js'
 
 async function main(): Promise<void> {
@@ -72,7 +72,6 @@ async function cmdChat(args: string[]): Promise<void> {
   const assistant = await buildAssistant()
   const message = args.join(' ').trim()
 
-  // Stream tokens to stdout as they arrive.
   assistant.events.on('output:gen-ai:chat:delta', ({ delta }) => {
     stdout.write(delta)
   })
@@ -83,9 +82,9 @@ async function cmdChat(args: string[]): Promise<void> {
     return
   }
 
-  // Interactive REPL.
   const rl = createInterface({ input: stdin, output: stdout })
-  console.log(`${assistant.character.name} is ready. Type 'exit' to quit.\n`)
+  const greeting = assistant.character.greetings[0]
+  console.log(`${greeting ?? `${assistant.character.name} is ready.`} (type 'exit' to quit)\n`)
   try {
     for (;;) {
       const line = (await rl.question('you › ')).trim()
@@ -112,15 +111,17 @@ async function cmdSkills(args: string[]): Promise<void> {
     const query = subArgs.join(' ')
     const hits = registry.search(query)
     console.log(`${hits.length} skill(s) matching "${query}":`)
-    for (const s of hits) console.log(`  ${s.manifest.metadata?.emoji ?? '•'} ${s.manifest.name} — ${s.manifest.description}`)
+    for (const s of hits) printSkillLine(s.manifest.metadata?.emoji, s.manifest.name, s.manifest.description)
     return
   }
-  const invocableOnly = subArgs.includes('-i') || subArgs.includes('--invocable') || sub === '-i'
+  const invocableOnly = args.includes('-i') || args.includes('--invocable')
   const skills = registry.list({ invocableOnly })
   console.log(`${skills.length} skill(s)${invocableOnly ? ' (user-invocable)' : ''}:`)
-  for (const s of skills) {
-    console.log(`  ${s.manifest.metadata?.emoji ?? '•'} ${s.manifest.name} — ${s.manifest.description}`)
-  }
+  for (const s of skills) printSkillLine(s.manifest.metadata?.emoji, s.manifest.name, s.manifest.description)
+}
+
+function printSkillLine(emoji: string | undefined, name: string, description: string): void {
+  console.log(`  ${emoji ?? '•'} ${name} — ${description}`)
 }
 
 async function cmdServe(args: string[]): Promise<void> {

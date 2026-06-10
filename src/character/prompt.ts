@@ -1,36 +1,37 @@
 /**
- * Fuses a {@link CharacterCard} plus runtime injections (skills, memory,
- * situational contexts) into a single system prompt. Mirrors AIRI's
- * `systemPrompt` computed getter: components are concatenated in a fixed order
- * with blank entries filtered out and joined by double newlines.
+ * System-prompt assembly — mirrors AIRI v0.10.2's `systemPrompt` computed
+ * getter (systemPrompt + description + personality joined with blank lines),
+ * extended with skills / long-term memory / runtime-context lanes.
  */
 
 import type { CharacterCard } from './card.js'
 
-/** Optional runtime blocks injected around the static card content. */
+/** Dynamic segments injected alongside the static card. */
 export interface SystemPromptParts {
-  /** The `<available_skills>` XML block describing callable skills. */
+  /** Rendered skill instructions. */
   skills?: string
-  /** Recalled long-term memory text. */
+  /** Long-term memory recall (MEMORY.md excerpts). */
   memory?: string
-  /** Situational context strings (memory recall, awareness updates...). */
+  /** Ad-hoc runtime contexts (AIRI `context:update` lane). */
   contexts?: string[]
 }
 
+function isPresent(segment: string | undefined): segment is string {
+  return typeof segment === 'string' && segment.trim() !== ''
+}
+
+/** Build the full system prompt for one agent run. */
 export function buildSystemPrompt(card: CharacterCard, parts?: SystemPromptParts): string {
-  const components: Array<string | undefined> = [
+  const segments: (string | undefined)[] = [
     card.systemPrompt,
     card.description,
-    card.personality ? `Personality:\n${card.personality}` : undefined,
-    card.scenario ? `Scenario:\n${card.scenario}` : undefined,
+    isPresent(card.personality) ? `Personality:\n${card.personality}` : undefined,
+    isPresent(card.scenario) ? `Scenario:\n${card.scenario}` : undefined,
     parts?.skills,
-    parts?.memory ? `# Long-term memory\n${parts.memory}` : undefined,
+    isPresent(parts?.memory) ? `# Long-term memory\n${parts.memory}` : undefined,
     ...(parts?.contexts ?? []),
     card.postHistoryInstructions,
   ]
 
-  return components
-    .map(c => (typeof c === 'string' ? c.trim() : ''))
-    .filter(c => c.length > 0)
-    .join('\n\n')
+  return segments.filter(isPresent).join('\n\n')
 }

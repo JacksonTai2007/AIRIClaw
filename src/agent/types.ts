@@ -1,22 +1,26 @@
 /**
- * Agent runtime contracts. Modelled on OpenClaw's `agent-core`: a streaming,
- * event-driven loop that calls the LLM, executes tool calls, and iterates until
- * the model stops requesting tools.
+ * Agent runtime contracts — a streaming, event-driven loop that calls the LLM,
+ * executes tool calls, and iterates until the model stops asking for tools.
+ *
+ * Event names follow OpenClaw 2026.6.2 `agent-core` (`agent_start/end`,
+ * `turn_start/end`, `message_start/update/end`, `tool_execution_start/end`).
  */
 
-import type { ChatMessage, ToolCall, ToolDefinition, TokenUsage } from '../llm/types.js'
+import type { ChatMessage, TokenUsage, ToolCall, ToolDefinition } from '../llm/types.js'
 
-/** A message in the agent's working transcript. Extends the LLM chat message. */
+export type { ToolCall } from '../llm/types.js'
+
+/** A message in the agent's working transcript. */
 export interface AgentMessage extends ChatMessage {
   /** Stable id for tracing / event correlation. */
   id?: string
   /** Wall-clock creation time (ms epoch). */
   createdAt?: number
-  /** Free-form metadata (source channel, skill id, etc.). */
+  /** Free-form metadata (source channel, skill name, ...). */
   metadata?: Record<string, unknown>
 }
 
-/** The result of executing a single tool call. */
+/** Result of executing one tool call. */
 export interface ToolResult {
   toolCallId: string
   name: string
@@ -25,7 +29,7 @@ export interface ToolResult {
   isError?: boolean
 }
 
-/** Executes a tool call and returns its result content. */
+/** Executes a requested tool call. */
 export type ToolExecutor = (call: ToolCall, signal?: AbortSignal) => Promise<ToolResult>
 
 export type ToolExecutionMode = 'sequential' | 'parallel'
@@ -38,25 +42,25 @@ export interface AgentContext {
 }
 
 export interface AgentLoopConfig {
-  /** Max LLM round-trips before forcibly stopping (guards runaway tool loops). */
+  /** Max LLM round-trips before forcibly stopping (default 12). */
   maxTurns?: number
   toolExecutionMode?: ToolExecutionMode
-  /** Executes a requested tool call. Required if any tools are provided. */
+  /** Required whenever tools are provided. */
   executeTool?: ToolExecutor
   temperature?: number
   maxTokens?: number
   signal?: AbortSignal
 }
 
-/** Streaming lifecycle events emitted by the agent loop. */
+/** Streaming lifecycle events emitted by the loop (OpenClaw-aligned names). */
 export type AgentEvent =
   | { type: 'agent_start' }
   | { type: 'turn_start'; turn: number }
-  | { type: 'text_delta'; text: string }
-  | { type: 'reasoning_delta'; text: string }
+  | { type: 'message_start'; turn: number }
+  | { type: 'message_update'; delta: string; channel: 'text' | 'reasoning' }
   | { type: 'message_end'; message: AgentMessage }
-  | { type: 'tool_call'; call: ToolCall }
-  | { type: 'tool_result'; result: ToolResult }
+  | { type: 'tool_execution_start'; call: ToolCall }
+  | { type: 'tool_execution_end'; result: ToolResult }
   | { type: 'turn_end'; turn: number }
   | { type: 'agent_end'; messages: AgentMessage[]; usage: TokenUsage }
   | { type: 'error'; error: Error }
